@@ -1,0 +1,25 @@
+[Unit]
+Description=OSCAR ARENA — Royal Rangers live quiz platform (Node + Socket.IO)
+After=network.target
+
+[Service]
+# Runtime user (create it, or use a low-priv user):
+#   useradd -r -m -d /opt/oscar-arena oscar
+User=oscar
+Group=oscar
+WorkingDirectory=/opt/oscar-arena
+Environment=NODE_ENV=production
+Environment=PORT=8080
+Environment=ADMIN_PIN=CHANGE_ME
+Environment=DB_PATH=/opt/oscar-arena/data/oscar-arena.db
+ExecStart=/usr/bin/node server/src/index.js
+Restart=always
+RestartSec=3
+# Node/express/socket.io sane production limits
+LimitNOFILE=65535
+# Graceful shutdown on stop
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

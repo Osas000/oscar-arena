@@ -1,0 +1,26 @@
+{
+  "name": "oscar-arena",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OSCAR ARENA — Royal Rangers live quiz platform (Kahoot alternative). Server-authoritative, 500+ players, free-tier deploy.",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c yellow,cyan \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "build": "npm run build -w client",
+    "start": "npm run start -w server",
+    "lint": "npm run lint -w client",
+    "test:engine": "npm run test -w server",
+    "stress": "node stress/load.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

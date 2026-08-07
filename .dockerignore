@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.gitignore
+data
+*.log
+.env
+.env.local
+server/data
+client/dist
+.hermes
+.tmp

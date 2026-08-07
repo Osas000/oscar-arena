@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --qa-navy: #0b1b3b;
+  --qa-navy-deep: #050d22;
+  --qa-gold: #ffb81c;
+  --qa-red: #e53935;
+  --qa-blue: #1e6be5;
+  --qa-yellow: #fbc02d;
+  --qa-green: #43a047;
+  --qa-surface: rgba(11, 27, 59, 0.92);
+  --qa-text: #f4f7ff;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: radial-gradient(1200px 600px at 50% -10%, #14306b 0%, var(--qa-navy) 45%, var(--qa-navy-deep) 100%);
+  color: var(--qa-text);
+  overflow-x: hidden;
+}
+
+/* Big clown-friendly number display for the countdown */
+.font-hud {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.logo-ring {
+  animation: spin-slow 24s linear infinite;
+}
+
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+
+/* ------------------------- gaming-vibe effects ------------------------- */
+
+/* Correct answer tile glow */
+.glow-correct {
+  animation: glow-correct 0.9s ease-out infinite alternate;
+}
+@keyframes glow-correct {
+  from { box-shadow: 0 0 16px 4px rgba(67, 160, 71, 0.55); }
+  to   { box-shadow: 0 0 34px 12px rgba(67, 160, 71, 0.95); }
+}
+
+/* "locked-in" answer tile pulse */
+.glow-pick {
+  animation: glow-pick 1.1s ease-in-out infinite;
+}
+@keyframes glow-pick {
+  0%, 100% { box-shadow: 0 0 12px 3px rgba(255, 184, 28, 0.45); }
+  50%      { box-shadow: 0 0 30px 10px rgba(255, 184, 28, 0.8); }
+}
+
+/* Screen shake on a wrong answer */
+.shake {
+  animation: shake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+@keyframes shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-7px); }
+  40%, 60% { transform: translateX(7px); }
+}
+
+/* Victory pop on a correct answer */
+.pop-victory {
+  animation: pop-victory 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+}
+@keyframes pop-victory {
+  0%   { transform: scale(0.4); opacity: 0; }
+  60%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Ambience: slow drifting nebula + floating sparkles (gaming arena) */
+.arena-ambience {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 500px at 15% 0%, rgba(30, 107, 229, 0.22), transparent 60%),
+    radial-gradient(700px 480px at 85% 100%, rgba(255, 184, 28, 0.10), transparent 60%),
+    radial-gradient(500px 400px at 70% 15%, rgba(139, 68, 173, 0.16), transparent 60%);
+}
+.arena-spark {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.7);
+  animation: spark-float linear infinite;
+  opacity: 0;
+}
+@keyframes spark-float {
+  0%   { transform: translateY(105vh) scale(0.5); opacity: 0; }
+  10%  { opacity: 0.9; }
+  90%  { opacity: 0.9; }
+  100% { transform: translateY(-8vh) scale(1.1); opacity: 0; }
+}

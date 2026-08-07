@@ -1,0 +1,34 @@
+# OSCAR ARENA — Fly.io config (free tier).
+# A single always-on (shared-cpu-1x) VM runs one Node process that serves the
+# built frontend + Socket.IO together. Free allowance covers this easily.
+
+app = "oscar-arena"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  # CHANGE THIS before first deploy: flyctl secrets set ADMIN_PIN=<pin>
+  ADMIN_PIN = "CHANGE_ME"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false   # WebSocket process must stay awake
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[mounts]]
+  source = "arena_data"
+  destination = "/app/server/data"
+
+[checks]
+  [checks.http_health]
+    port = 8080
+    path = "/healthz"
+    interval = "15s"
+    timeout = "4s"
+    grace_period = "10s"
