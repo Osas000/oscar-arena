@@ -1,4 +1,5 @@
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import crypto from 'node:crypto';
@@ -15,7 +16,11 @@ export const ENV = {
   ADMIN_PIN: process.env.ADMIN_PIN || '000000',
   DB_PATH: path.isAbsolute(process.env.DB_PATH || '')
     ? process.env.DB_PATH
-    : path.join(__dirname, '..', process.env.DB_PATH || './data/oscar-arena.db'),
+    : process.env.RENDER
+      // Render free tier has no persistent disk — use a tmp file so the app
+      // boots cleanly on every wake (seed-on-empty repopulates quizzes).
+      ? path.join(os.tmpdir(), 'oscar-arena.db')
+      : path.join(__dirname, '..', process.env.DB_PATH || './data/oscar-arena.db'),
 };
 
 export function generatePin(length = 6) {

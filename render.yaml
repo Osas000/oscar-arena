@@ -1,0 +1,31 @@
+# OSCAR ARENA — Render blueprint (card-free deploy from GitHub).
+# Render > New > Blueprint, or connect this Git repo and it auto-detects this file.
+# Uses the same Dockerfile as Fly for a reliable better-sqlite3 build.
+#
+# NOTE on Render Free tier:
+#   - free web services spin down after ~15 min idle and wake on first request
+#   - there is NO persistent disk on free, so SQLite resets each wake; the app
+#     self-heals via seed-on-empty (see engine.seedQuizzesIfEmpty) and the admin
+#     PIN comes from the environment below, not the DB.
+#   For a long-running event, consider the paid Starter tier ($7/mo) which has a
+#   persistent disk and never spins down.
+
+services:
+  - type: web
+    name: oscar-arena
+    runtime: docker
+    repo: https://github.com/Osas000/oscar-arena
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: RENDER
+        value: "true"            # tells config.js to use a tmp DB (no free disk)
+      - key: ADMIN_PIN
+        sync: false              # set this in the Render dashboard ("ADMIN_PIN")
+      - key: DB_PATH
+        value: /tmp/oscar-arena.db
+    healthCheckPath: /healthz

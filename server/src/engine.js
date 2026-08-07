@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { db } from './db.js';
 import { uuid, generatePin } from './config.js';
 import { getAdminPin } from './settings.js';
@@ -54,6 +55,28 @@ export function createQuiz(title) {
   const id = uuid();
   db.prepare('INSERT INTO quizzes (id, title) VALUES (?, ?)').run(id, title);
   return { id, title };
+}
+
+/**
+ * Seed quizzes from seed-quizzes.json if the DB is empty.
+ *
+ * Render's free tier has no persistent disk, so the SQLite file resets each time
+ * the service sleeps/redeploys and the DB would otherwise be blank. This makes
+ * the app self-healing: on boot, if there are no quizzes yet, load the bundled
+ * starter quizzes so a host always has questions ready.
+ */
+export function seedQuizzesIfEmpty() {
+  const count = db.prepare('SELECT COUNT(*) AS n FROM quizzes').get().n;
+  if (count > 0) return { seeded: 0 };
+  const quotes = JSON.parse(
+    fs.readFileSync(new URL('./seed-quizzes.json', import.meta.url), 'utf8')
+  );
+  let seeded = 0;
+  for (const quiz of quotes) {
+    saveQuiz({ id: uuid(), title: quiz.title, questions: quiz.questions });
+    seeded++;
+  }
+  return { seeded };
 }
 
 export function getQuiz(id) {

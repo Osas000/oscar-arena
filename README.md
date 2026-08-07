@@ -61,70 +61,60 @@ bash stress/run.sh --players 500     # boots throwaway server, runs load, report
 OSCAR_URL=http://host:8080 ADMIN_PIN=000000 node stress/load.js --players 500
 ```
 
-## Deploy — Fly.io free tier (chosen) or Oracle free ARM (fallback)
+## Deploy — Render (card-free, recommended) or Fly.io free tier
 
-**Why Fly.io:** a live quiz needs a persistent WebSocket, so serverless
-(Vercel/Netlify) is ruled out. Fly runs ONE always-on Linux VM with WebSockets
-out of the box, has a genuine free allowance (a single small VM is plenty — we
-proved peak RSS ~96MB at 500 players), and deploys with one command.
+> **2026 note:** Fly.io now requires a credit-card verification hold on new
+> accounts, which some Nigerian bank cards can't pass. **Render's free web
+> service needs NO credit card**, supports Socket.IO/WebSockets, and deploys
+> straight from your GitHub repo. If your card clears Fly's check, either works.
 
-All app-side prerequisites are already built (Dockerfile, fly.toml, volumes,
-health checks). You only need a Fly account + auth, then:
-
-```bash
-# 1. One-time: create account at https://fly.io, then
-flyctl auth login            # opens browser; sign in (do NOT paste creds in chat)
-
-# 2. One-time: register the app as an ID and create its data volume
-flyctl launch --no-deploy    # reads fly.toml, creates app + volume
-
-# 3. One-time: store the admin PIN encrypted (never in git)
-flyctl secrets set ADMIN_PIN=<your-secret>
-
-# 4. Push it live
-flyctl deploy                # builds the Dockerfile image, boots the VM, serves
-# -> https://oscar-arena.fly.dev   (swap ADMIN_PIN placeholder in fly.toml first!)
-```
-
-**Things already in place so the deploy succeeds cleanly:** `flyctl launch`
-reads `fly.toml` for region, VM size, port 8080, and the `arena_data` volume
-mounted at `/app/server/data`. `auto_stop_machines = false` keeps the
-WebSocket process awake, and `/healthz` is our Fly health-check endpoint. The
-`Dockerfile` already builds the React client + server into one image.
-
-After deploy, verify (QA gate over the PUBLIC url, not localhost):
-```bash
-curl https://oscar-arena.fly.dev/healthz          # {ok,heap,rss}
-curl https://oscar-arena.fly.dev/manifest.webmanifest
-curl -o /dev/null -w "%{http_code}\n" https://oscar-arena.fly.dev/icons/icon-192.png
-```
-Then run a quick player+host smoke against the public URL via the qa runner.
-
-**Region presets in `fly.toml`:**
-Open it and set `primary_region` (e.g. `ams` = Amsterdam, nearest to Nigeria;
-`fra` Frankfurt). Change memory via `fly machines update` later if you ever
-exceed the free allowance — the numbers we observed (96MB RSS) fit the free
-instance comfortably.
+**Why not serverless:** a live quiz needs a persistent WebSocket, so
+Vercel/Netlify are ruled out. Both Render and Fly run an always-on container with
+WebSockets out of the box. We stress-proved peak RSS ~96MB at 500 players, so a
+small single instance is plenty.
 
 ---
 
-**Fallback — Oracle Cloud Always-Free ARM VM (cheap serverless no).** Truly
-$0 forever, always-on, no allowance to run out. More manual than Fly (create
-a VM, push the code, run). The same `Dockerfile` drops straight onto any
-Docker host; or use the included systemd unit:
+### Option A — Render (no credit card) — RECOMMENDED if you can't verify a card
+
+Included: `render.yaml` (the auto-deploy blueprint) + a self-healing `RENDER`
+mode (`config.js` uses a tmp DB, and `engine.seedQuizzesIfEmpty()` repopulates a
+starter quiz on every boot, so the app always works even without a persistent disk).
 
 ```bash
-# as root, with the repo at /opt/oscar-arena
-useradd -r -m -d /opt/oscar-arena oscar
-install -o oscar -g oscar deploy/oscar-arena.service /etc/systemd/system/
-mkdir -p /opt/oscar-arena/data && chown oscar:oscar /opt/oscar-arena/data
-systemctl daemon-reload && systemctl enable --now oscar-arena
+# 1. Push this repo to your GitHub (done: https://github.com/Osas000/oscar-arena)
+# 2. In Render: New > Blueprint, select that repo. It reads render.yaml and
+#    creates the oscar-arena web service (Docker) automatically.
+# 3. In the service's Environment, set ADMIN_PIN to your 4-8 digit PIN.
+#    (The blueprint declares it as `sync: false` so you control the value.)
+# 4. Deploy. You get a public URL: https://oscar-arena.onrender.com
 ```
 
-**Important in both:** persist the data dir (`/app/server/data` on Fly via the
-`arena_data` volume; `/opt/oscar-arena/data` on Oracle) — that's where the
-SQLite DB lives. A reboot without it loses nothing critical but drops saved
-sessions/answers.
+**Render free caveats (we've engineered around them):**
+- **No persistent disk** → SQLite resets each wake. Mitigated: quizzes are
+  seeded-on-empty from `server/src/seed-quizzes.json`, and the admin PIN comes
+  from the `ADMIN_PIN` env var (never the DB). Player/answer records are
+  per-session anyway.
+- **Idle spin-down** after ~15 min → wakes on first player connect (~1 min
+  delay once). Fine for an event; for a 24/7 smooth experience use Render
+  Starter ($7/mo) which never spins down and has a persistent disk.
+
+---
+
+### Option B — Fly.io free tier (if you can pass card verification)
+
+All app-side prerequisites are built (Dockerfile, fly.toml, health checks):
+
+```bash
+flyctl auth login            # opens browser
+flyctl launch --no-deploy    # creates app + volume
+flyctl secrets set ADMIN_PIN=<your-secret>
+flyctl deploy                # -> https://oscar-arena.fly.dev
+```
+
+`auto_stop_machines = false` keeps the WebSocket process awake; the `arena_data`
+volume persists `/app/server/data` (the DB) across restarts — so on Fly the DB
+and changed PIN survive, which is nicer than Render free.
 
 ## Configuration (`.env`, never commit `.env`)
 

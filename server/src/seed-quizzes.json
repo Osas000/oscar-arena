@@ -1,0 +1,53 @@
+[
+  {
+    "title": "Royal Rangers Kickoff",
+    "questions": [
+      {
+        "type": "mc",
+        "prompt": "What colour is the Royal Rangers flag?",
+        "time_limit": 15,
+        "points": 1000,
+        "options": [
+          { "text": "Red, gold and blue", "correct": true },
+          { "text": "Green and white", "correct": false },
+          { "text": "Black and silver", "correct": false },
+          { "text": "Purple and pink", "correct": false }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "Which verse is often called the Ranger's verse?",
+        "time_limit": 15,
+        "points": 1000,
+        "options": [
+          { "text": "Luke 2:52", "correct": true },
+          { "text": "John 3:16", "correct": false },
+          { "text": "Psalm 23", "correct": false },
+          { "text": "Genesis 1:1", "correct": false }
+        ]
+      },
+      {
+        "type": "tf",
+        "prompt": "The Royal Rangers motto contains the word 'Adventure'.",
+        "time_limit": 12,
+        "points": 1000,
+        "options": [
+          { "text": "True", "correct": true },
+          { "text": "False", "correct": false }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "What are the three colours on the Royal Rangers emblem?",
+        "time_limit": 15,
+        "points": 1000,
+        "options": [
+          { "text": "Red, gold, blue", "correct": true },
+          { "text": "Red, white, blue", "correct": false },
+          { "text": "Gold, green, black", "correct": false },
+          { "text": "Blue, white, red", "correct": false }
+        ]
+      }
+    ]
+  }
+]

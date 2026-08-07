@@ -284,6 +284,12 @@ if (fs.existsSync(clientDist)) {
 
 httpServer.listen(ENV.PORT, () => {
   console.log(`OSCAR ARENA server listening on :${ENV.PORT} (${ENV.NODE_ENV})`);
+  try {
+    const { seeded } = engine.seedQuizzesIfEmpty();
+    if (seeded > 0) console.log(`Seeded ${seeded} starter quiz(zes) into empty DB`);
+  } catch (err) {
+    console.warn('Seed skipped:', err.message);
+  }
 });
 
 function shutdown() {
