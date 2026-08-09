@@ -130,8 +130,12 @@ export default function HostLive({ onExit }) {
             {/* Answer grid with counts */}
             <div className="grid w-full max-w-4xl grid-cols-2 gap-2 sm:gap-4">
               {question.options.map((opt, i) => {
-                const count = reveal ? (reveal.distribution?.[i] || 0) : 0;
-                const correct = reveal && i === reveal.correctChoice;
+                // REVEAL ONLY: counts/✅ may only render in the reveal phase.
+                // While the question is live the grid stays 100% blank — no
+                // stale distribution, no correct-choice tick, no hint.
+                const isReveal = phase === 'reveal';
+                const count = isReveal ? (reveal?.distribution?.[i] || 0) : 0;
+                const correct = isReveal && reveal && i === reveal.correctChoice;
                 return (
                   <motion.div key={opt.id} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.07 }}
                     className={`relative flex min-h-20 items-center justify-center rounded-2xl p-2 text-center font-bold text-white shadow-xl transition-all sm:min-h-28 sm:p-4 ${correct ? 'ring-8 ring-white scale-[1.02]' : ''} ${phase === 'reveal' && !correct ? 'opacity-40' : ''}`}
@@ -216,7 +220,7 @@ export default function HostLive({ onExit }) {
             <Podium
               top3={podium.top3}
               myPlayerId={null}
-              onAction={() => h.end()}
+              onAction={() => h.finish()}
               actionLabel="Finish & Show Results"
               actionClassName="bg-white/10 text-white hover:bg-white/20"
             />

@@ -217,6 +217,15 @@ io.on('connection', (socket) => {
     ack && ack({ ok: true });
   });
 
+  // 'Finish & Show Results' from a natural podium — the game already
+  // concluded; this only skips the podium hold. It must NOT mark the game
+  // host-ended (that would show players 'Session Ended / try again' instead
+  // of the champion + FULL RESULTS on a completed game).
+  socket.on('host:finish', ({ sessionId }, ack) => {
+    engine.finishPodium(sessionId);
+    ack && ack({ ok: true });
+  });
+
   // ---- player answer ----
   socket.on('player:answer', ({ sessionId, playerId, choice }, ack) => {
     const res = engine.submitAnswer(sessionId, playerId, choice);

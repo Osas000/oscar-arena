@@ -33,6 +33,11 @@ export const useHost = create((set, get) => ({
   // --- live session ---
   socket: null,
   connected: false,
+  // Eager from the first paint: if we ever stored a live session or PIN on
+  // this device, a refresh lands on the 'Reconnecting…' screen instead of
+  // flashing HostLogin while tryAutoResume does its async work. Falls back
+  // to the login page the moment the restore settles.
+  restoring: !!(loadResume()?.sessionId || loadResume()?.adminPin),
   live: null,           // session summary { id, pin, status, players:[] }
   phase: 'idle',        // idle | lobby | countdown | question | reveal | scoreboard | podium | done
   question: null,
@@ -115,7 +120,7 @@ export const useHost = create((set, get) => ({
     socket.onAny((evt, payload) => console.log('[HOST-EVT]', evt, JSON.stringify(payload)?.slice(0, 120)));
 
     socket.on('connect', () => {
-      set({ connected: true, error: null });
+      set({ connected: true, reconnecting: false, error: null });
       // Socket.IO reconnects transparently after a network blip — the server
       // sees a fresh socket.id, so re-attach our host identity to the live
       // session (also cancels the server's host-lost auto-end timer).
@@ -135,8 +140,10 @@ export const useHost = create((set, get) => ({
         });
       }
     });
-    socket.on('disconnect', () => set({ connected: false }));
-    socket.on('connect_error', (e) => set({ error: e.message }));
+    socket.on('disconnect', () => set({ connected: false, reconnecting: true }));
+    // Transient blips (airplane mode, hotspot drops) auto-retry — never show
+    // a scary "websocket error" line for something that heals itself.
+    socket.on('connect_error', () => set({ reconnecting: true }));
 
     socket.on('phase', (p) => {
       // 'done' arrives with its payload via the 'done' event right after.
@@ -153,6 +160,11 @@ export const useHost = create((set, get) => ({
     }));
     socket.on('question', (q) => set({
       question: q, answeredCount: 0, countdownDeadline: null, serverOffset: q.serverTime - Date.now(), phase: 'question',
+      // CRITICAL: never carry the PREVIOUS round's reveal into the new
+      // question. A stale {correctChoice} here made the host/projector paint
+      // a ✅ over the CURRENT question's tiles while players were still
+      // answering ("is that tick showing the answer?" report).
+      reveal: null, scoreboard: null, podium: null, done: null,
     }));
     socket.on('answer_received', (d) => set({ answeredCount: d.answeredCount, playerCount: d.playerCount, players: playersFrom(d) }));
     socket.on('player_joined', (d) => {
@@ -247,6 +259,9 @@ export const useHost = create((set, get) => ({
     const stored = loadResume();
     if (!stored) return;
     if (!stored.sessionId && !stored.adminPin) return;
+    // Hold the 'Reconnecting…' screen from the first paint until auth AND the
+    // live session are restored — prevents the login→dashboard→game flash.
+    set({ restoring: true });
     if (stored.adminPin) setAdminPin(stored.adminPin);
     if (!get().authed) {
       try {
@@ -255,11 +270,12 @@ export const useHost = create((set, get) => ({
       } catch {
         clearResume();
         setAdminPin(null);
-        set({ authed: false, authError: null });
+        set({ authed: false, authError: null, restoring: false });
         return;
       }
     }
     if (stored.sessionId) await get().resumeLive(stored.sessionId);
+    set({ restoring: false });
   },
 
   start: () => new Promise((resolve) => {
@@ -271,6 +287,9 @@ export const useHost = create((set, get) => ({
     });
   }),
   next: () => { const { socket, live } = get(); socket?.emit('host:next', { sessionId: live.id }); },
+  // Natural podium → show final results. NOT an end: keeps doneReason=null so
+  // players see the champion + FULL RESULTS, never the aborted-game wording.
+  finish: () => { const { socket, live } = get(); socket?.emit('host:finish', { sessionId: live.id }); },
   // End must be ack'd: the UI navigates away immediately after, and if we
   // fired-and-forgot then reloaded, the emit could race the socket teardown —
   // that was the "end section takes 3-4 reloads" symptom. The server acks once
@@ -295,7 +314,7 @@ export const useHost = create((set, get) => ({
     const s = get().socket;
     if (s) s.disconnect();
     set({
-      socket: null, connected: false, live: null, phase: 'idle', question: null,
+      socket: null, connected: false, restoring: false, reconnecting: false, live: null, phase: 'idle', question: null,
       countdownDeadline: null, serverOffset: 0, reveal: null, answeredCount: 0, playerCount: 0, scoreboard: null, podium: null,
       done: null, locked: false, players: [], error: null,
     });

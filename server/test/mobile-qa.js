@@ -170,9 +170,11 @@ async function runViewport(vp) {
   });
   const host = await ctx.newPage();
   host.on('pageerror', (e) => fail(`HOST pageerror: ${e.message}`));
+  const t0 = Date.now();
+  const ts = () => `+${((Date.now() - t0) / 1000).toFixed(1)}s`;
   host.on('console', (m) => {
     const t = m.text();
-    if (t.startsWith('[PHASE-SET]') || t.startsWith('[HOST-EVT]') || t.startsWith('[HOSTLIVE-RENDER]')) console.log(`  [host console] ${t}`);
+    if (t.startsWith('[PHASE-SET]') || t.startsWith('[HOST-EVT]') || t.startsWith('[HOSTLIVE-RENDER]')) console.log(`  [host ${ts()}] ${t}`);
   });
 
   // ---------- HOST: login ----------
@@ -215,7 +217,50 @@ async function runViewport(vp) {
     }
   });
   await sleep(200);
-  await clickEnabled(host, 'Save & Host');
+  // Second question: the stale-reveal leak (previous round's ✅ painting the
+  // live question) can only be caught with >=2 questions, so this quiz is a
+  // two-question game. The first reveal must NOT bleed onto question 2.
+  await clickEnabled(host, '+ Add question');
+  await waitForText(host, 'QUESTION 2');
+  await host.evaluate(() => {
+    // Q2's prompt is a TEXTAREA (Q1's is textarea too); index 1 = Q2.
+    const areas = [...document.querySelectorAll('textarea[placeholder="Type the question here…"]')];
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+    if (areas[1]) {
+      setter.call(areas[1], 'What is the largest ocean?');
+      areas[1].dispatchEvent(new Event('input', { bubbles: true }));
+      areas[1].dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  await host.evaluate(() => {
+    // Q2's option fields are the THIRD and FOURTH placeholders in the document
+    // (Q1 has two). Index them exactly so Q1's text is untouched.
+    const inputs = [...document.querySelectorAll('input[placeholder="Answer option…"]')];
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    if (inputs[2]) { setter.call(inputs[2], 'Pacific'); inputs[2].dispatchEvent(new Event('input', { bubbles: true })); inputs[2].dispatchEvent(new Event('change', { bubbles: true })); }
+    if (inputs[3]) { setter.call(inputs[3], 'Atlantic'); inputs[3].dispatchEvent(new Event('input', { bubbles: true })); inputs[3].dispatchEvent(new Event('change', { bubbles: true })); }
+  });
+  // mark the first Q2 option (Pacific) as correct via its radio group
+  await host.evaluate(() => {
+    const radios = [...document.querySelectorAll('input[type="radio"][name="correct-1"]')];
+    if (radios[0]) radios[0].click();
+  });
+  await host.evaluate(() => {
+    const nums = [...document.querySelectorAll('input[type="number"]')];
+    if (nums[1]) {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(nums[1], 20); // generous time limit for Q2 as well
+      nums[1].dispatchEvent(new Event('input', { bubbles: true }));
+      nums[1].dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  await sleep(200);
+  await clickEnabled(host, 'Save');
+  await waitForText(host, 'Quiz Library');
+  const afterSaveText = await host.evaluate(() => document.body.innerText);
+  if (afterSaveText.includes('JOIN AT')) fail('save auto-hosted: started a lobby by itself');
+  console.log('  ✓ save returned to dashboard without auto-hosting');
+  await host.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => x.innerText.includes('Host ▶')); b && b.click(); });
   await waitForText(host, 'JOIN AT');
   if (!(await assertNoHOverflow(host, 'host-lobby'))) fail('host-lobby overflow');
   await shot(host, vp, 'host-lobby');
@@ -248,10 +293,35 @@ async function runViewport(vp) {
   // ---------- START ----------
   await clickByText(host, 'START');
   await waitForText(player, q1);
+  await sleep(900); // let the tiles spring in so screenshots show the live grid
+
+  // ---------- QUESTION: NO ANSWER LEAK ----------
+  // Regression (3rd report): while a question is live, NO checkmark/correct
+  // symbol may appear anywhere — not on the player's tiles, not on the host
+  // board. Wrong-position ticks from a PREVIOUS round's reveal used to paint
+  // over the current question (stale reveal state), hinting the answer.
+  const assertNoTicks = async (page, label) => {
+    const txt = await page.evaluate(() => document.body.innerText);
+    const ticks = ['✓', '✅', '✔', '✗', '❌', '✘'].filter((t) => txt.includes(t));
+    if (ticks.length) fail(`${label}: tick symbol(s) [${ticks.join('')}] visible while question is live`);
+    else console.log(`  ✓ ${label}: no tick symbols during live question`);
+  };
+  await assertNoTicks(host, 'host-question');
+  await assertNoTicks(player, 'player-question');
+  await sleep(300);
+  await assertNoTicks(host, 'host-question-live');
+  // Evidence checkpoint: at this instant the player MUST be able to answer —
+  // the four option tiles are on screen (never a verdict/answered state while
+  // the question is live). Capture it deterministically (await the save).
+  const tilesLive = await player.evaluate(() =>
+    [...document.querySelectorAll('button')].map((b) => b.innerText.trim()).filter(Boolean).slice(0, 8)
+  );
+  if (!tilesLive.some((t) => t.includes('Abuja'))) fail(`question tiles not on the player screen while live: [${tilesLive.join(' | ')}]`);
+  console.log(`  ✓ player answer tiles live on screen: [${tilesLive.join(' | ')}]`);
+  await player.screenshot({ path: `${OUT}/${vp.name}-player-question-tiles.png` });
+  await host.screenshot({ path: `${OUT}/${vp.name}-host-question-live.png` }); // host board, same instant, deterministic
   if (!(await assertNoHOverflow(host, 'host-question'))) fail('host-question overflow');
   if (!(await assertNoHOverflow(player, 'player-question'))) fail('player-question overflow');
-  await shot(host, vp, 'host-question');
-  await shot(player, vp, 'player-question');
 
   // ---------- ANSWER ----------
   await player.evaluate(() => {
@@ -262,30 +332,39 @@ async function runViewport(vp) {
   if (!(await assertNoHOverflow(player, 'player-answered'))) fail('player-answered overflow');
   await shot(player, vp, 'player-answered');
 
-  // ---------- REVEAL -> SCOREBOARD ----------
-    // The game runs a timed chain (reveal 4s -> scoreboard 8s -> podium -> done)
-    // and the host can skip ahead with clicks, so a strict wait for any single
-    // transient phase is flaky. Wait for whichever of these appears; Next and
-    // Next Question are both on the host's action button.
+  // ---------- REVEAL -> (auto) SCOREBOARD -> Q2 ----------
+    // The engine auto-chains: reveal (4s) -> scoreboard (8s) -> next question.
+    // The host's Next button SKIPS the scoreboard, so we ride the chain with
+    // generous waits instead of clicking — that keeps the assertions honest
+    // about what players see on a normal game.
     await waitUntilAny(host, ['Next', 'LEADERBOARD', 'PODIUM', 'FULL RESULTS'], 40000);
     if (!(await assertNoHOverflow(host, 'host-reveal'))) fail('host-reveal overflow');
-    // If we're early (reveal visible), click through to the scoreboard.
-    const onReveal = await host.evaluate(() => document.body.innerText.includes('Next ▶'));
-    if (onReveal) await clickByText(host, 'Next');
-    await waitUntilAny(host, ['LEADERBOARD', 'PODIUM', 'FULL RESULTS'], 15000);
-    await shot(host, vp, 'host-scoreboard');
-    await waitUntilAny(player, ['Leaderboard', 'PODIUM'], 15000);
-    await sleep(1200); // rows slide in from x:-40 — let the animation settle
-    if (!(await assertNoHOverflow(host, 'host-scoreboard'))) fail('host-scoreboard overflow');
-    if (!(await assertNoHOverflow(player, 'player-scoreboard'))) fail('player-scoreboard overflow');
-    await shot(host, vp, 'host-scoreboard');
-    await shot(player, vp, 'player-scoreboard');
+    await shot(host, vp, 'host-reveal');
+    await shot(player, vp, 'player-reveal');
+
+    // ---------- QUESTION 2 (stale-reveal regression) ----------
+    // Q1's reveal fired mid-game; Q2 must open CLEAN (no ✅ from Q1 painted
+    // over Q2's tiles while the next players are answering).
+    await waitForText(player, 'What is the largest ocean?', 45000);
+    await sleep(900); // let the tiles spring in so the q2 screenshots show the grid
+    await assertNoTicks(host, 'host-q2-live');
+    await assertNoTicks(player, 'player-q2-live');
+    await shot(host, vp, 'host-q2-live');
+    await shot(player, vp, 'player-q2-live');
+    if (!(await assertNoHOverflow(host, 'host-q2-live'))) fail('host-q2 overflow');
+    if (!(await assertNoHOverflow(player, 'player-q2-live'))) fail('player-q2 overflow');
+    await player.evaluate(() => {
+      const t = [...document.querySelectorAll('button')].find((b) => b.innerText.includes('Pacific'));
+      if (t) t.click();
+    });
+    await waitForText(player, 'Answer locked in');
+    const q2HostBefore = await host.evaluate(() => document.body.innerText);
+    console.log(`  [q2-before-wait] host=${JSON.stringify(q2HostBefore.slice(0, 180))}`);
+    await waitUntilAny(host, ['Next', 'LEADERBOARD', 'PODIUM', 'FULL RESULTS'], 45000);
 
     // ---------- PODIUM ----------
-    const onScoreboard = await host.evaluate(() => document.body.innerText.includes('Next Question'));
-    if (onScoreboard) await clickByText(host, 'Next Question');
-    await waitFor(host, 'PODIUM', 15000);
-    await waitFor(player, 'PODIUM', 15000);
+    await waitFor(host, 'PODIUM', 30000);
+    await waitFor(player, 'PODIUM', 30000);
     await sleep(1200); // let the tiles spring in (they animate from y:200)
     if (!(await assertNoHOverflow(host, 'host-podium'))) fail('host-podium overflow');
     if (!(await assertNoHOverflow(player, 'player-podium'))) fail('player-podium overflow');
@@ -296,6 +375,13 @@ async function runViewport(vp) {
     const podiumBeforeDone = await host.evaluate(() => document.body.innerText.includes('PODIUM'));
     if (podiumBeforeDone) await clickByText(host, 'Finish & Show Results');
     await waitFor(host, 'FULL RESULTS', 15000);
+    // Natural conclusion MUST celebrate: the player sees the champion, never
+    // 'Session Ended / try again' (regression: Finish called host:end, which
+    // flipped the terminal page to the aborted-game wording).
+    await waitFor(player, 'CHAMPION', 15000);
+    const naturalDoneText = await player.evaluate(() => document.body.innerText);
+    if (naturalDoneText.includes('Try again')) fail('natural finish showed the abort wording (Finish must not host:end)');
+    console.log('  ✓ natural finish: player sees the champion, not Try again');
   if (!(await assertNoHOverflow(host, 'host-done'))) fail('host-done overflow');
   await shot(host, vp, 'host-done');
 
@@ -359,7 +445,9 @@ async function endFlowCheck(vp) {
     inputs[1].dispatchEvent(new Event('change', { bubbles: true }));
   });
   await sleep(200);
-  await clickEnabled(host, 'Save & Host');
+  await clickEnabled(host, 'Save');
+  await waitForText(host, 'Quiz Library');
+  await host.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => x.innerText.includes('Host ▶')); b && b.click(); });
   await waitForText(host, 'JOIN AT');
   const pin = await host.evaluate(() => {
     const m = document.body.innerText.match(/GAME PIN\s+(\d{6})/);
@@ -418,6 +506,15 @@ async function endFlowCheck(vp) {
   await clickEnabled(p2, 'Enter Arena');
   await waitForText(p2, 'Waiting for the host');
 
+  // ---- HOST REFRESH MID-GAME: must land directly on the live session ----
+  // (regression: refresh used to flash the admin PIN page -> dashboard ->
+  // game; it must re-attach to the SAME live session with no interstitials)
+  await host.reload();
+  await waitForText(host, 'JOIN AT', 10000);
+  const hostAfterRefresh = await host.evaluate(() => document.body.innerText);
+  if (hostAfterRefresh.includes('Host Console')) fail('host refresh fell back to the login page');
+  console.log('  ✓ host refresh: re-attached directly to the live lobby');
+
   await clickByText(host, 'START');
   await waitForText(p2, 'End-flow test question?');
   await p2.evaluate(() => {
@@ -433,6 +530,15 @@ async function endFlowCheck(vp) {
   if (midText.includes('CHAMPION')) fail('end-flow: CHAMPION shown on a mid-game host end');
   if (!(await shotNoHOverflow(p2, 'session-ended-midgame'))) fail('end-flow: session-ended overflow (mid-game)');
   await shot(p2, vp, 'session-ended-midgame');
+
+  // ---- TRY AGAIN: must go STRAIGHT to the landing page ----
+  // (regression: it flashed the join form — PIN + name — before the home
+  // screen appeared. Clicking Try again must land on Play/Host.)
+  await clickEnabled(p2, 'Try again');
+  await waitUntilAny(p2, ['▶ PLAY', 'HOST A QUIZ', 'Royal Rangers Live Quiz'], 8000);
+  const tryAgainText = await p2.evaluate(() => document.body.innerText);
+  if (tryAgainText.includes('GAME PIN')) fail('try-again: flashed the join (PIN) page before home');
+  console.log('  ✓ try-again: landed on the landing page, no join-form flash');
 
   await browser.close();
 }

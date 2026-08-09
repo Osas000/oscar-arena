@@ -50,15 +50,11 @@ export default function AnswerTiles({
             cls = 'opacity-35';
           }
         } else if (isMyPick) {
-          // "locked in" juiciness: bright ring + pulsing scale while waiting.
-          cls = 'z-10 ring-4 ring-white scale-105 glow-pick';
-          pickedPulse = (
-            <motion.span
-              className="absolute inset-0 rounded-2xl ring-2 ring-white"
-              animate={{ opacity: [0.2, 0.9, 0.2], scale: [1, 1.12, 1] }}
-              transition={{ repeat: Infinity, duration: 1.1 }}
-            />
-          );
+          // Locked in: QUIET state. No bright ring / pulse / glow — anything
+          // eye-catching on the player's own pick reads as a verdict ("it shows
+          // I'm right") and leaks a hint while others are still answering.
+          // A subtle outline is enough to show the tap landed.
+          cls = 'z-10 ring-2 ring-white/40';
         }
 
         return (

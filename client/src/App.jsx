@@ -1,5 +1,6 @@
 // OSCAR ARENA root — routes Player vs Host mode with hash routing.
 import { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import { usePlayer } from './store/usePlayer.js';
 import { useHost } from './store/useHost.js';
 import Landing from './screens/Landing.jsx';
@@ -48,13 +49,40 @@ export default function App() {
       // re-attaches our identity. Only show the join form when we truly have no
       // session to resume.
       const resuming = player.resumeToken && !player.playerId && (player.sessionId || player.pin);
-      return (player.playerId || resuming)
-        ? <PlayerGame onLeave={() => { player.reset(); go('/'); }} />
-        : <PlayerJoin onBack={() => go('/')} />;
+      if (player.playerId || resuming) {
+        return <PlayerGame onLeave={() => { player.reset(); go('/'); }} onHome={() => { player.reset(); go('/'); }} />;
+      }
+      if (player.phase === 'left') {
+        // Leaving the arena: reset() flips to 'left' — show a clean goodbye
+        // instead of flashing the PIN form for the frame before the router
+        // lands on the homepage.
+        return (
+          <div className="flex min-h-screen flex-col items-center justify-center text-center px-6">
+            <div className="mb-4 text-5xl">👋</div>
+            <h2 className="text-2xl font-bold text-white">See you at the next game!</h2>
+            <button onClick={() => { player.reset(); go('/'); }} className="mt-8 rounded-xl bg-arena-gold px-8 py-3 font-bold text-arena-navy hover:brightness-110">
+              Back to Home
+            </button>
+          </div>
+        );
+      }
+      return <PlayerJoin onBack={() => go('/')} />;
     }
 
     // -------------------------------- HOST --------------------------------
     if (route.mode === 'host') {
+      // Restoring from a live session (refresh / airplane-mode recovery): show
+      // the silent reconnect screen until auth + live session are back — never
+      // flash the PIN form or a stale dashboard mid-restore.
+      if (host.restoring && !host.live) {
+        return (
+          <div className="flex min-h-screen flex-col items-center justify-center px-6 text-center">
+            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1.6, ease: 'linear' }} className="mb-6 text-5xl">🧭</motion.div>
+            <h2 className="text-xl font-bold text-white">Reconnecting to your session…</h2>
+            <p className="mt-2 text-sm text-white/50">Hold on, we're getting you back in.</p>
+          </div>
+        );
+      }
       if (!host.authed) return <HostLogin onBack={() => go('/')} />;
 
       if (route.sub === 'builder') {

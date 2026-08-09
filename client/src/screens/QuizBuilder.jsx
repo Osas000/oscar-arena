@@ -68,7 +68,13 @@ export default function QuizBuilder({ quizId, onBack, onHost }) {
         options: q.options.map((o) => ({ text: o.text.trim(), correct: !!o.correct })),
       }));
       const saved = await saveQuiz({ id: quizId, title: title.trim(), questions: cleaned });
-      onHost(saved.id);
+      // Save = save, then return to the dashboard. The host decides when to
+      // start a game — saving must NEVER auto-create a session (reported bug:
+      // "I edit some stuff, click save, and it just generates a code and
+      // starts waiting for users"). onHost was repurposing the save button
+      // into a 'Save & Host' that hijacked the flow.
+      void saved;
+      onBack();
     } catch (e) { setError(e.message); } finally { setSaving(false); }
   };
 
@@ -91,7 +97,7 @@ export default function QuizBuilder({ quizId, onBack, onHost }) {
           <button onClick={onBack} className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white/70 hover:bg-white/20">Back</button>
           <motion.button whileTap={{ scale: 0.95 }} onClick={save} disabled={saving}
             className="whitespace-nowrap rounded-lg bg-arena-gold px-3 py-1.5 text-sm font-bold text-arena-navy hover:brightness-110 disabled:opacity-60 sm:px-4">
-            {saving ? 'Saving…' : 'Save & Host'}
+            {saving ? 'Saving…' : 'Save'}
           </motion.button>
         </div>
       </header>

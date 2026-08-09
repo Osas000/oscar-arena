@@ -92,6 +92,10 @@ export const usePlayer = create((set, get) => ({
     socket.on('disconnect', () => set({ connected: false }));
     socket.io.on('reconnect_attempt', () => set({ reconnecting: true }));
     socket.io.on('reconnect', () => set({ reconnecting: false }));
+    // Transient network blips (airplane mode, hotspot glitches) auto-retry —
+    // surface them as a quiet 'reconnecting' flag, NOT as a scary error line
+    // on the join screen. Only real join/answer failures set error.
+    socket.on('connect_error', () => set({ reconnecting: true }));
 
     // --- server events ---
     socket.on('phase', (p) => {
@@ -143,7 +147,6 @@ export const usePlayer = create((set, get) => ({
     socket.on('kicked', () => {
       set({ kicked: true, phase: 'done', error: 'You were removed from the game' });
     });
-    socket.on('connect_error', (e) => set({ error: e.message }));
     return socket;
   },
 
@@ -201,7 +204,7 @@ export const usePlayer = create((set, get) => ({
     const s = get().socket;
     if (s) s.disconnect();
     set({
-      socket: null, connected: false, error: null, phase: 'join', pin: '', nickname: '',
+      socket: null, connected: false, error: null, reconnecting: false, phase: 'left', pin: '', nickname: '',
       playerId: null, resumeToken: null, question: null, myChoice: null, myResult: null,
       total: 0, correctCount: 0, playerCount: 0, answeredCount: 0, scoreboardTop: [], countdownDeadline: null,
       podium: null, done: null, kicked: false, sessionId: null,
@@ -211,12 +214,15 @@ export const usePlayer = create((set, get) => ({
 
 function applySnapshot(st) {
   const set = {};
-  // Map question-status to answered/question based on whether we'd already answered.
-  if (st.status === 'question') set.phase = st.myAnswer ? 'answered' : 'question';
+  // Map question-status to question. If we already answered, myChoice is
+  // restored below and PlayerGame shows the locked-in state; a raw
+  // 'answered' phase has NO render block and would leave a refreshed player
+  // staring at a blank screen mid-question.
+  if (st.status === 'question') set.phase = 'question';
   else set.phase = st.status;
   if (st.status === 'reveal') {
     // Restore the reveal screen with our answer + correct choice.
-    set.myResult = st.myAnswer ? { ...st.myAnswer, correctChoice: st.correctChoice, total: st.total, points: st.myAnswer.points, streak: st.myAnswer.streak } : null;
+    set.myResult = st.myAnswer ? { ...st.myAnswer, correctChoice: st.correctChoice, total: st.total, points: st.myAnswer.points, streak: st.myAnswer.streak, questionIndex: st.question?.index ?? -1 } : null;
     // If we hadn't answered this question yet (late reconnect during reveal),
     // show the reveal tiles disabled with the correct answer highlighted.
     set.correctChoice = st.correctChoice;

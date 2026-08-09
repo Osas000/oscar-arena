@@ -556,7 +556,7 @@ function closeQuestion(session) {
   });
 }
 
-function finishGame(session) {
+export function finishGame(session) {
   session.status = 'podium';
   session.doneReason = null;
   const top3 = ranking(session).slice(0, 3);
@@ -570,11 +570,32 @@ function finishGame(session) {
   defer(session, podiumHoldMs(), () => {
     const cur = liveSessions.get(session.id);
     if (cur && cur.status === 'podium') {
-      cur.status = 'done';
-      publish(cur, 'all', 'done', { results: ranking(cur) });
-      publish(cur, 'all', 'phase', { phase: 'done' });
+      revealResults(cur);
     }
   });
+}
+
+// 'Finish & Show Results' on the podium: the game already CONCLUDED naturally
+// (doneReason=null) — this just skips the podium hold and shows the final
+// results. It is NOT a host-end: players must see the champion + FULL RESULTS,
+// never 'Session Ended / try again'. (Regression: the button used to call
+// endSession, which set doneReason='host' and flipped the player's terminal
+// page to the aborted-game wording on a completed game.)
+export function finishPodium(sessionId) {
+  const session = liveSessions.get(sessionId);
+  if (session && session.status === 'podium') {
+    clearSessionTimers(session);
+    revealResults(session);
+  }
+  return session;
+}
+
+function revealResults(session) {
+  const cur = liveSessions.get(session.id);
+  if (!cur || cur.status !== 'podium') return;
+  cur.status = 'done';
+  publish(cur, 'all', 'done', { results: ranking(cur) });
+  publish(cur, 'all', 'phase', { phase: 'done' });
 }
 
 export function ranking(session) {
