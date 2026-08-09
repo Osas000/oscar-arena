@@ -302,6 +302,145 @@ async function runViewport(vp) {
   await browser.close();
 }
 
+// ---------- END-FLOW QA (host ends session) ----------
+// Regression for the three reported bugs:
+//   1. End not immediate ("takes 3-4 reloads") — host:end must propagate to
+//      every player instantly, from the LOBBY and from mid-question.
+//   2. "You are the CHAMPION" on an abandoned game — a host-ended session is
+//      NOT a conclusion: the player must see a clean 'Session Ended', never a
+//      champion crown (that is reserved for naturally finished games).
+//   3. Refresh after the end used to bounce the player to the PIN screen; the
+//      resume path must land on the terminal 'Session Ended' screen instead.
+async function endFlowCheck(vp) {
+  console.log(`\n=== END-FLOW ${vp.name} ${vp.width}x${vp.height} ===`);
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing'] });
+  const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: true, hasTouch: true, serviceWorkers: 'block', reducedMotion: 'reduce' });
+  await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await ctx.addInitScript(() => {
+    const css = [
+      '.arena-ambience,.arena-spark{display:none!important}',
+      '*{animation-duration:0.01s!important;animation-iteration-count:1!important;animation-delay:0s!important;transition-duration:0.01s!important}',
+    ].join('');
+    const once = () => {
+      const st = document.createElement('style');
+      st.textContent = css;
+      (document.head || document.documentElement).appendChild(st);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', once, { once: true });
+    else once();
+  });
+
+  const host = await ctx.newPage();
+  host.on('pageerror', (e) => fail(`HOST pageerror: ${e.message}`));
+  const player = await ctx.newPage();
+  player.on('pageerror', (e) => fail(`PLAYER pageerror: ${e.message}`));
+
+  // ---- host login ----
+  await host.goto(BASE + '/#/host', { waitUntil: 'domcontentloaded' });
+  await waitForText(host, 'Host Console');
+  await typeByPlaceholder(host, '••••••', '000000');
+  await clickEnabled(host, 'Unlock');
+  await waitForText(host, 'Quiz Library');
+
+  // ---- create + host a tiny quiz ----
+  await typeByPlaceholder(host, 'New quiz title…', 'End Flow QA');
+  await clickEnabled(host, '+ Create');
+  await waitForText(host, 'Add question');
+  await clickEnabled(host, '+ Add question');
+  await waitForText(host, 'QUESTION 1');
+  await typeByPlaceholder(host, 'Quiz title', 'End Flow QA');
+  await typeByPlaceholder(host, 'Type the question here…', 'End-flow test question?');
+  await typeByPlaceholder(host, 'Answer option…', 'Alpha');
+  await host.evaluate(() => {
+    const inputs = [...document.querySelectorAll('input[placeholder="Answer option…"]')];
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(inputs[1], 'Beta');
+    inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+    inputs[1].dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await sleep(200);
+  await clickEnabled(host, 'Save & Host');
+  await waitForText(host, 'JOIN AT');
+  const pin = await host.evaluate(() => {
+    const m = document.body.innerText.match(/GAME PIN\s+(\d{6})/);
+    return m ? m[1] : null;
+  });
+  if (!pin) throw new Error('end-flow: no PIN found');
+  console.log(`  PIN=${pin}`);
+
+  // ---- player joins (lobby) ----
+  await player.goto(BASE + '/#/player', { waitUntil: 'domcontentloaded' });
+  await waitForText(player, 'GAME PIN');
+  await typeByPlaceholder(player, '000 000', pin);
+  await typeByPlaceholder(player, 'e.g. RangerOne', 'EndTester');
+  await clickEnabled(player, 'Enter Arena');
+  await waitForText(player, 'Waiting for the host');
+
+  // ---- END FROM LOBBY (must be immediate, no champion) ----
+  await clickByText(host, 'End session');
+  await waitUntilAny(player, ['Session Ended', 'GAME PIN'], 8000);
+  const lobbyEndText = await player.evaluate(() => document.body.innerText);
+  if (!lobbyEndText.includes('Session Ended')) fail('end-flow: lobby end did not reach the player');
+  if (lobbyEndText.includes('CHAMPION')) fail('end-flow: "CHAMPION" shown on an abandoned lobby session');
+  if (lobbyEndText.includes('host ended this session')) console.log('  ✓ lobby end: player shows the professional "host ended this session" message');
+  if (!(await assertNoHOverflow(player, 'player-session-ended-lobby'))) fail('end-flow: session-ended overflow (lobby)');
+  await shot(player, vp, 'session-ended-lobby');
+
+  // ---- host returns to dashboard after End ----
+  await waitForText(host, 'Quiz Library', 8000);
+
+  // ---- REFRESH-RESUME: reloading the player page after an end must land on
+  // the terminal screen (no PIN form, no zombie) ----
+  await player.goto(BASE + '/#/player', { waitUntil: 'domcontentloaded' });
+  await waitForText(player, 'Session Ended', 10000);
+  const refreshText = await player.evaluate(() => document.body.innerText);
+  if (refreshText.includes('GAME PIN')) fail('end-flow: refresh after end fell back to the PIN screen');
+  console.log('  ✓ refresh-resume: player landed on the terminal "Session Ended" screen');
+
+  // ---- END MID-QUESTION (the original "3-4 reloads" complaint) ----
+  await host.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => x.innerText.includes('Host ▶')); b && b.click(); });
+  await waitForText(host, 'JOIN AT');
+  const pin2 = await host.evaluate(() => {
+    const m = document.body.innerText.match(/GAME PIN\s+(\d{6})/);
+    return m ? m[1] : null;
+  });
+  if (!pin2) throw new Error('end-flow: no PIN 2');
+
+  // fresh player session (the old one is stuck on the terminal screen)
+  const ctx2 = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: true, hasTouch: true, serviceWorkers: 'block', reducedMotion: 'reduce' });
+  await ctx2.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  const p2 = await ctx2.newPage();
+  p2.on('pageerror', (e) => fail(`PLAYER-2 pageerror: ${e.message}`));
+  await p2.goto(BASE + '/#/player', { waitUntil: 'domcontentloaded' });
+  await waitForText(p2, 'GAME PIN');
+  await typeByPlaceholder(p2, '000 000', pin2);
+  await typeByPlaceholder(p2, 'e.g. RangerOne', 'MidGameTester');
+  await clickEnabled(p2, 'Enter Arena');
+  await waitForText(p2, 'Waiting for the host');
+
+  await clickByText(host, 'START');
+  await waitForText(p2, 'End-flow test question?');
+  await p2.evaluate(() => {
+    const t = [...document.querySelectorAll('button')].find((b) => b.innerText.includes('Alpha'));
+    if (t) t.click();
+  });
+  await waitForText(p2, 'Answer locked in');
+  // end WHILE the question is live — the very bug: players hung for 3-4
+  // reloads before ever seeing the end.
+  await clickByText(host, 'End session');
+  await waitForText(p2, 'Session Ended', 8000);
+  const midText = await p2.evaluate(() => document.body.innerText);
+  if (midText.includes('CHAMPION')) fail('end-flow: CHAMPION shown on a mid-game host end');
+  if (!(await shotNoHOverflow(p2, 'session-ended-midgame'))) fail('end-flow: session-ended overflow (mid-game)');
+  await shot(p2, vp, 'session-ended-midgame');
+
+  await browser.close();
+}
+
+async function shotNoHOverflow(page, label) {
+  return assertNoHOverflow(page, label);
+}
+
 // ---------- LANDING at every viewport ----------
 async function landingCheck(vp) {
   const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing'] });
@@ -337,6 +476,9 @@ for (const vp of VIEWPORTS) {
   await landingCheck(vp);
   await runViewport(vp);
 }
+// End-flow regression is heavy (an extra browser, quiz build, two sessions);
+// it is viewport-agnostic, so run it exactly once at the phone viewport.
+await endFlowCheck(VIEWPORTS[0]);
 
 console.log(`\n${failures === 0 ? 'MOBILE-QA-OK — zero overflow at all viewports/phases' : `MOBILE-QA-FAIL — ${failures} overflow(s) found`}`);
 process.exit(failures === 0 ? 0 : 1);

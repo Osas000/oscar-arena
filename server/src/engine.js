@@ -218,7 +218,7 @@ export function hostDetach(sessionId, socketId) {
 // (host:join) cancels it within the grace window.
 // ---------------------------------------------------------------------------
 const hostLostTimers = new Map(); // sessionId -> timer id
-const HOST_LOST_GRACE_MS = () => Number(process.env.HOST_LOST_GRACE_MS) || 15000;
+const HOST_LOST_GRACE_MS = () => Number(process.env.HOST_LOST_GRACE_MS) || 30000;
 
 export function scheduleHostLostEnd(sessionId) {
   const session = liveSessions.get(sessionId);
@@ -248,16 +248,26 @@ export function joinPlayer({ sessionId, nickname, resumeToken, socketId }) {
   if (!session) throw Object.assign(new Error('Game not found'), { code: 'NO_GAME' });
   // Kahoot-style: join is allowed while the game is LIVE (lobby, countdown,
   // question, reveal, scoreboard). A late joiner simply hasn't answered the
-  // already-closed questions. Only the finished phases reject new players.
+  // already-closed questions. Only the finished phases reject NEW players.
+  // EXCEPTION: a resumeToken for an EXISTING player is always honoured — a
+  // returning/refreshing player of a DONE session must land on the terminal
+  // "session ended" screen, not on an error/join screen (the zombie report:
+  // "host ended, but their phone kept waiting/restarting for 3-4 reloads").
   const joinable = ['lobby', 'countdown', 'question', 'reveal', 'scoreboard'].includes(session.status);
-  if (!joinable) {
+  const preexisting = resumeToken
+    ? [...session.players.values()].find((p) => p.resumeToken === resumeToken && !p.kicked) || null
+    : null;
+  if (!joinable && !preexisting) {
+    if (session.status === 'done') {
+      throw Object.assign(new Error('This game has ended'), { code: 'GAME_ENDED' });
+    }
     throw Object.assign(new Error('Game already started'), { code: 'GAME_STARTED' });
   }
 
-  let player = null;
+  let player = preexisting;
   const cleanName = String(nickname || '').trim().slice(0, 24);
 
-  if (resumeToken) {
+  if (!player && resumeToken) {
     player = [...session.players.values()].find((p) => p.resumeToken === resumeToken && !p.kicked);
   }
 
@@ -548,6 +558,7 @@ function closeQuestion(session) {
 
 function finishGame(session) {
   session.status = 'podium';
+  session.doneReason = null;
   const top3 = ranking(session).slice(0, 3);
   publish(session, 'all', 'podium', { top3 });
   publish(session, 'all', 'phase', { phase: 'podium' });
@@ -584,6 +595,7 @@ export function endSession(sessionId) {
   cancelHostLostEnd(sessionId);
   clearSessionTimers(session);
   session.status = 'done';
+  session.doneReason = 'host';
   db.prepare('UPDATE sessions SET status = ?, ended_at = ? WHERE id = ?').run(
     'done', Math.floor(Date.now() / 1000), session.id
   );
@@ -624,6 +636,10 @@ export function playerStateSnapshot(session, playerId) {
 
   return {
     status: session.status,
+    // Fresh server clock so a resumed client can (re)calibrate its offset
+    // against NOW, not against the round's startedAt (a stale offset made the
+    // reveal gate fire early/late for reconnecting players).
+    serverTime: Date.now(),
     pin: session.pin,
     quizTitle: session.quiz.title,
     questionIndex: session.questionIndex,
@@ -641,7 +657,13 @@ export function playerStateSnapshot(session, playerId) {
     // Extra data so a reconnect mid-scoreboard/podium/done redraws fully.
     scoreboardTop: session.status === 'scoreboard' ? ranking(session).slice(0, 5) : undefined,
     podium: session.status === 'podium' ? { top3: ranking(session).slice(0, 3) } : undefined,
-    done: session.status === 'done' ? { results: ranking(session) } : undefined,
+    // 'done' carries the same shape as the live done event so a resumed/refreshed
+    // player lands on the SAME terminal screen (host-ended vs. natural finish):
+    // with `reason: 'host'` the client shows a professional "session ended"
+    // screen instead of the champion rank (the game was never concluded).
+    done: session.status === 'done'
+      ? { results: ranking(session), ended: session.doneReason === 'host', reason: session.doneReason || undefined }
+      : undefined,
   };
 }
 

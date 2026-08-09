@@ -115,7 +115,11 @@ export const usePlayer = create((set, get) => ({
       });
     });
     socket.on('your_result', (r) => {
-      set({ myResult: r, total: r.total, phase: 'reveal' });
+      // Tag the result with the question it belongs to so a stale result from
+      // a PREVIOUS round can never paint itself over a NEW question (the
+      // '4th question showed ✓ too early' report: a reconnected player's
+      // snapshot can carry an old myResult into the current round).
+      set({ myResult: { ...r, questionIndex: get().question?.index ?? -1 }, total: r.total, phase: 'reveal' });
       if (r.correct) playCorrect(); else playWrong();
     });
     socket.on('scoreboard', (sb) => {
@@ -127,9 +131,14 @@ export const usePlayer = create((set, get) => ({
       confettiBurst(document.body);
     });
     socket.on('done', (d) => {
+      // A host-ended session is NOT a celebration: no podium fanfare/confetti,
+      // and the screen renders a professional 'session ended / try again'
+      // page (no champion rank) because the game never concluded.
       set({ done: d, phase: 'done' });
-      playPodium();
-      confettiBurst(document.body, { count: 220 });
+      if (!d.ended && !d.reason) {
+        playPodium();
+        confettiBurst(document.body, { count: 220 });
+      }
     });
     socket.on('kicked', () => {
       set({ kicked: true, phase: 'done', error: 'You were removed from the game' });
@@ -224,9 +233,11 @@ function applySnapshot(st) {
     answeredCount: st.answeredCount,
     quizTitle: st.quizTitle,
     question: st.question,
-    serverOffset: st.question?.serverTime ? st.question.serverTime - Date.now() : 0,
+    serverOffset: st.serverTime ? st.serverTime - Date.now() : 0,
     countdownDeadline: st.countdownDeadline ?? null,
-    myResult: set.myResult ?? (st.myAnswer ? { ...st.myAnswer, total: st.total } : null),
+    myResult: set.myResult ?? (st.myAnswer
+      ? { ...st.myAnswer, total: st.total, questionIndex: st.question?.index ?? -1 }
+      : null),
     myChoice: st.myAnswer ? st.myAnswer.choice : null,
   });
 }

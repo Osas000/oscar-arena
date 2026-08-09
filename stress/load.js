@@ -212,15 +212,28 @@ async function main() {
   });
 
   // The engine cycles Q → reveal → scoreboard → next … → podium → done.
-  // If --endmid is set, the host ends at that question instead.
+  // If --endmid is set, the host ends after the ENDMID-th question fully
+  // closes (its reveal is broadcast AFTER every player got your_result), so
+  // expected result-echo counts stay valid while still exercising the
+  // end-propagation path from a live mid-game state.
   const done = new Promise((res) => host.on('done', res));
   if (ENDMID > 0) {
     let ended = false;
-    host.on('question', (q) => {
-      if (!ended && (q.index + 1) >= ENDMID) {
+    let reveals = 0;
+    const doEnd = () => {
+      if (!ended) {
         ended = true;
-        setTimeout(() => host.emit('host:end', { sessionId: sess.id }), 800);
+        host.emit('host:end', { sessionId: sess.id });
       }
+    };
+    host.on('reveal', () => {
+      reveals += 1;
+      if (reveals >= ENDMID) setTimeout(doEnd, 50);
+    });
+    // Guard: never leave the run hanging if reveals are suppressed; end on the
+    // scoreboard as a fallback.
+    host.on('scoreboard', () => {
+      if (reveals >= ENDMID) doEnd();
     });
   }
   const guardMs = NQ * (QTIME + (process.env.STRESS_FAST === '1' ? 2500 : 16000)) + 30000;
@@ -256,27 +269,46 @@ async function main() {
     FAIL(`end-session propagation failed: only ${stats.doneEchoes}/${joined} players reached done`);
   }
 
-  // --------- ZOMBIE REJOIN CHECK (--endmid) ----------
-  // The user-visible bug: after the host ends, refreshing / re-entering must
-  // NOT resurrect the session. A resume-token rejoin of a DONE session has to
-  // be refused cleanly (client falls back to the join screen).
+  // --------- RESUME-AFTER-END CHECK (--endmid) ----------
+  // The user-visible bug: after the host ends, a player who refreshes /
+  // re-enters must land on the TERMINAL done screen — never a zombie lobby,
+  // never "3-4 reloads", and never a resurrected game. So:
+  //   - a returning player (valid resumeToken) is ACCEPTED, with the done
+  //     snapshot (client renders "Session ended … try again");
+  //   - a brand-new player (no resumeToken) is REFUSED (GAME_ENDED) — the
+  //     ended session cannot be joined fresh.
   if (ENDMID > 0 && players.length > 0) {
     const v = players[0];
-    const refused = await new Promise((res) => {
+    const resume = await new Promise((res) => {
       const z = io(BASE, { transports: ['websocket'], reconnection: false, forceNew: true });
       const t = setTimeout(() => { z.close(); res(null); }, 8000);
       z.on('connect', () => {
         z.emit('player:join_pin', { pin: sess.pin, nickname: 'Zombie', resumeToken: v.resume }, (a) => {
+          clearTimeout(t); z.close();
+          res(a && { ok: a.ok, code: a.code, error: a.error, status: a.state?.status });
+        });
+      });
+      z.on('connect_error', () => { clearTimeout(t); res(null); });
+    });
+    const acceptedTerminal = resume && resume.ok === true && resume.status === 'done';
+    if (!acceptedTerminal) FAIL(`resume-after-end: returning player did not land on done (${JSON.stringify(resume)})`);
+    console.log(`  resume-after-end accepted → status='${resume.status}' (terminal screen, no zombie)`);
+
+    const fresh = await new Promise((res) => {
+      const z = io(BASE, { transports: ['websocket'], reconnection: false, forceNew: true });
+      const t = setTimeout(() => { z.close(); res(null); }, 8000);
+      z.on('connect', () => {
+        z.emit('player:join_pin', { pin: sess.pin, nickname: 'Newbie' }, (a) => {
           clearTimeout(t); z.close();
           res(a && { ok: a.ok, code: a.code, error: a.error });
         });
       });
       z.on('connect_error', () => { clearTimeout(t); res(null); });
     });
-    const isRefused = refused && refused.ok === false;
-    if (!isRefused) FAIL(`resurrection: ended session ACCEPTED a rejoin (${JSON.stringify(refused)})`);
-    console.log(`  zombie-rejoin refused (code='${refused.code}') → client falls back to join screen`);
-    PASS('ended session cannot be resurrected by a returning player');
+    const refusedFresh = fresh && fresh.ok === false && fresh.code === 'GAME_ENDED';
+    if (!refusedFresh) FAIL(`ended session ACCEPTED a fresh join (${JSON.stringify(fresh)})`);
+    console.log(`  fresh rejoin refused (code='${fresh.code}') → can't resurrect the game`);
+    PASS('ended session is terminal: resumes land on done, fresh joins are refused');
   }
   console.log(ok
     ? `\nSTRESS-OK — ${joined} players on 1 Node server process, full game cycle, no OOM.${ENDMID ? ' end-session propagated to everyone.' : ''}`

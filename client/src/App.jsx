@@ -33,6 +33,13 @@ export default function App() {
     if (route.mode === 'player' && !player.socket) player.connect();
   }, [route.mode]);
 
+  // Auto-resume a live host session after a page refresh (network cut /
+  // airplane-mode scenario): re-attach to the SAME session instead of making
+  // the user re-enter the PIN while the host-lost auto-end is ticking.
+  useEffect(() => {
+    if (route.mode === 'host') host.tryAutoResume?.();
+  }, [route.mode]);
+
   const screen = (() => {
     // ------------------------------- PLAYER -------------------------------
     if (route.mode === 'player') {
@@ -61,7 +68,7 @@ export default function App() {
       }
 
       if (host.live && host.phase !== 'idle') {
-        return <HostLive onExit={() => { host.end(); host.destroy(); go('/host'); }} />;
+        return <HostLive onExit={() => { host.end().then(() => { host.destroy(); go('/host'); }); }} />;
       }
 
       return (

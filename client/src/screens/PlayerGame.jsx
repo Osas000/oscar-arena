@@ -41,6 +41,11 @@ export default function PlayerGame({ onLeave }) {
   // behaviour players complained about. Until then, keep the waiting state.
   const serverNow = Date.now() + s.serverOffset;
   const revealReady = !deadline || serverNow >= deadline;
+  // Belt-and-braces: the reveal may only paint for the question the result
+  // actually belongs to. A stale result from a previous round (e.g. restored
+  // by a reconnect snapshot) must never draw a ✓ over the current question.
+  const sameRound = !myResult?.questionIndex || !question || myResult.questionIndex === question.index;
+  const canReveal = revealReady && sameRound;
 
   return (
     <div className="flex min-h-screen flex-col items-center px-4 py-6">
@@ -83,7 +88,7 @@ export default function PlayerGame({ onLeave }) {
         )}
 
         {/* ---------------- QUESTION / ANSWER ---------------- */}
-        {(phase === 'question' || (phase === 'reveal' && !myResult) || (phase === 'reveal' && myResult && !revealReady)) && question && (
+        {(phase === 'question' || (phase === 'reveal' && !myResult) || (phase === 'reveal' && myResult && !canReveal)) && question && (
           <motion.div key="q" className="flex w-full flex-1 flex-col items-center" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -24 }}>
             <div className="mb-2 text-sm font-semibold text-white/50">
               Question {question.index + 1} of {question.total}
@@ -106,7 +111,7 @@ export default function PlayerGame({ onLeave }) {
         )}
 
         {/* ---------------- REVEAL (my result) ---------------- */}
-        {phase === 'reveal' && myResult && revealReady && question && (
+        {phase === 'reveal' && myResult && canReveal && question && (
           <motion.div
             key="reveal"
             className={`flex w-full flex-1 flex-col items-center ${myResult.correct ? '' : 'game-over'}`}
@@ -191,9 +196,13 @@ export default function PlayerGame({ onLeave }) {
               {s.kicked ? 'You were removed' : s.done?.reason === 'host' ? 'Session Ended' : 'Game Over'}
             </h2>
             {s.done?.reason === 'host' && (
-              <p className="mt-2 text-white/70">The host ended this session.</p>
+              <p className="mt-2 text-white/70">The host ended this session. Thanks for playing, {s.nickname}!</p>
             )}
-            {!s.kicked && s.done?.results && (
+            {/* Host-ended / removed sessions are NOT a conclusion: no rank, no
+                champion crown, no results listing. The game was abandoned, so
+                the player gets a clean 'try again' — never 'You are the
+                CHAMPION' (that only belongs to a naturally finished game). */}
+            {!s.kicked && s.done?.reason !== 'host' && s.done?.results && (
               <div className="mt-4">
                 <p className="text-white/70">Final score: <span className="font-mono text-2xl font-black text-arena-gold">{total.toLocaleString()}</span></p>
                 {/* Your rank out of everyone — computed from the full results list */}
@@ -218,7 +227,7 @@ export default function PlayerGame({ onLeave }) {
               </div>
             )}
             <button onClick={onLeave} className="mt-8 rounded-xl bg-arena-gold px-8 py-3 font-bold text-arena-navy hover:brightness-110">
-              Back to start
+              {s.kicked ? 'Back to start' : s.done?.reason === 'host' ? 'Try again' : 'Back to start'}
             </button>
           </motion.div>
         )}

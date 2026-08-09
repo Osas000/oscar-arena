@@ -3,6 +3,21 @@ import { create } from 'zustand';
 import { setAdminPin, api } from '../lib/api.js';
 import { createSocket } from '../lib/socket.js';
 
+export const HOST_RESUME_KEY = 'oscar_arena_host_resume';
+
+function saveResume(data) {
+  try { localStorage.setItem(HOST_RESUME_KEY, JSON.stringify(data)); } catch { /* private mode */ }
+}
+function loadResume() {
+  try {
+    const raw = localStorage.getItem(HOST_RESUME_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function clearResume() {
+  try { localStorage.removeItem(HOST_RESUME_KEY); } catch { /* ignore */ }
+}
+
 export const useHost = create((set, get) => ({
   // --- auth ---
   authed: false,
@@ -39,7 +54,14 @@ export const useHost = create((set, get) => ({
     try {
       setAdminPin(pin);
       const quizzes = await api.listQuizzes();
+      // Remember the PIN on this device so a page refresh can silently
+      // resume (and re-attach to a live session) instead of forcing a
+      // re-typed PIN every time the network blips.
+      saveResume({ ...(loadResume() || {}), adminPin: pin });
       set({ authed: true, quizzes, adminPin: pin, authLoading: false });
+      // A refresh cleared our live context but the session may still be
+      // running — silently re-attach so the game is not orphaned.
+      get().tryAutoResume?.();
     } catch (e) {
       setAdminPin(null);
       set({ authLoading: false, authError: 'Wrong PIN. Try again.' });
@@ -49,6 +71,7 @@ export const useHost = create((set, get) => ({
   logout: () => {
     get().destroy();
     setAdminPin(null);
+    clearResume();
     set({ authed: false, quizzes: [], adminPin: '', authError: null, pinSaved: false });
   },
 
@@ -97,9 +120,18 @@ export const useHost = create((set, get) => ({
       // sees a fresh socket.id, so re-attach our host identity to the live
       // session (also cancels the server's host-lost auto-end timer).
       const { live } = get();
-      if (live) {
-        socket.emit('host:join', { sessionId: live.id, adminPin: get().adminPin }, (res) => {
-          if (!res?.ok) set({ error: res?.error || 'Reconnect failed' });
+      const sessionId = live?.id || loadResume()?.sessionId;
+      if (sessionId) {
+        socket.emit('host:join', { sessionId, adminPin: get().adminPin }, (res) => {
+          if (res?.ok) {
+            // Refresh-resume: the page reloaded in the middle of a live game
+            // (reported: refresh → admin page → PIN → “it ended the session”).
+            // Re-attaching here resurrects the SAME session on the SAME
+            // quiz — no new session, no data loss, no auto-end.
+            if (!live) get().resumeLive(sessionId, res);
+          } else {
+            set({ error: res?.error || 'Reconnect failed' });
+          }
         });
       }
     });
@@ -154,26 +186,80 @@ export const useHost = create((set, get) => ({
     return new Promise((resolve, reject) => {
       socket.emit('host:join', { sessionId: session.id, adminPin: get().adminPin }, (res) => {
         if (!res.ok) return reject(new Error(res.error));
-        // adopt full live state (handles host reconnect + fresh lobby)
-        const s = res.live || res.state || {};
-        set({
-          live: res.session || session,
-          phase: s.status || 'lobby',
-          countdownDeadline: s.countdownDeadline || null,
-          question: s.question || null,
-          reveal: s.correctChoice !== undefined ? { correctChoice: s.correctChoice, distribution: s.distribution } : null,
-          scoreboard: s.scoreboard || null,
-          podium: s.podium || null,
-          done: s.done || null,
-          answeredCount: s.answeredCount || 0,
-          playerCount: s.playerCount || 0,
-          players: s.players || [],
-          locked: s.locked || false,
-          error: null,
-        });
+        // Remember the live session across refreshes (keyed with the PIN we
+        // already hold) so a reload re-attaches instead of killing the game.
+        saveResume({ sessionId: session.id, adminPin: get().adminPin });
+        get().adoptHostState(res);
         resolve(res);
       });
     });
+  },
+
+  // Adopt full live state (fresh lobby or reconnect restore).
+  adoptHostState: (res) => {
+    const s = res.live || res.state || {};
+    set({
+      live: res.session,
+      phase: s.status || 'lobby',
+      countdownDeadline: s.countdownDeadline || null,
+      question: s.question || null,
+      reveal: s.correctChoice !== undefined ? { correctChoice: s.correctChoice, distribution: s.distribution } : null,
+      scoreboard: s.scoreboard || null,
+      podium: s.podium || null,
+      done: s.done || null,
+      answeredCount: s.answeredCount || 0,
+      playerCount: s.playerCount || 0,
+      players: s.players || [],
+      locked: s.locked || false,
+      error: null,
+    });
+  },
+
+  // A page refresh wipes the in-memory store; if we started a session earlier
+  // (sessionId + PIN persisted), silently re-attach to it — the live host is
+  // restored, host-lost auto-end cancelled. Returns true when resumed.
+  resumeLive: async (sessionId, res) => {
+    if (!sessionId) return false;
+    const socket = get().socket || get().ensureSocket();
+    return new Promise((resolve) => {
+      const done = (r) => {
+        if (r?.ok) {
+          get().adoptHostState(r);
+          saveResume({ sessionId, adminPin: get().adminPin });
+          resolve(true);
+        } else {
+          clearResume();
+          set({ error: r?.error || 'Session ended' });
+          resolve(false);
+        }
+      };
+      if (res) return done(res);
+      socket.emit('host:join', { sessionId, adminPin: get().adminPin }, done);
+    });
+  },
+
+  // Try to resume a previously-live session (page refresh / network drop).
+  // Restores the stored PIN + auth silently, then re-attaches the live
+  // session so a refresh lands straight back in the game — no re-typed PIN,
+  // no host-lost auto-end.
+  tryAutoResume: async () => {
+    if (get().live) return;
+    const stored = loadResume();
+    if (!stored) return;
+    if (!stored.sessionId && !stored.adminPin) return;
+    if (stored.adminPin) setAdminPin(stored.adminPin);
+    if (!get().authed) {
+      try {
+        const quizzes = await api.listQuizzes();
+        set({ authed: true, quizzes, adminPin: stored.adminPin || get().adminPin, authLoading: false });
+      } catch {
+        clearResume();
+        setAdminPin(null);
+        set({ authed: false, authError: null });
+        return;
+      }
+    }
+    if (stored.sessionId) await get().resumeLive(stored.sessionId);
   },
 
   start: () => new Promise((resolve) => {
@@ -185,7 +271,22 @@ export const useHost = create((set, get) => ({
     });
   }),
   next: () => { const { socket, live } = get(); socket?.emit('host:next', { sessionId: live.id }); },
-  end: () => { const { socket, live } = get(); socket?.emit('host:end', { sessionId: live.id }); },
+  // End must be ack'd: the UI navigates away immediately after, and if we
+  // fired-and-forgot then reloaded, the emit could race the socket teardown —
+  // that was the "end section takes 3-4 reloads" symptom. The server acks once
+  // it has broadcast 'done' to every player.
+  end: () => new Promise((resolve) => {
+    const { socket, live } = get();
+    if (!socket || !live) return resolve({ ok: false, error: 'No live session' });
+    socket.emit('host:end', { sessionId: live.id }, (res) => {
+      if (res?.ok) {
+        // Session deliberately ended — stop auto-resuming it on refresh,
+        // but keep the PIN so the host isn't forced to retype it.
+        saveResume({ adminPin: get().adminPin });
+      }
+      resolve(res || { ok: false });
+    });
+  }),
   kick: (playerId) => { const { socket, live } = get(); socket?.emit('host:kick', { sessionId: live.id, playerId }); },
   setLocked: (locked) => { const { socket, live } = get(); socket?.emit('host:lock', { sessionId: live.id, locked }); },
   refreshPlayers: () => set((s) => ({ players: s.live?.players || s.players })),
