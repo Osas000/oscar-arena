@@ -271,6 +271,7 @@ function liveStateFull(s) {
     out.scoreboard = { top: engine.ranking(s).slice(0, 5), full: engine.ranking(s) };
   }
   if (s.status === 'podium') out.podium = { top3: engine.ranking(s).slice(0, 3) };
+  if (s.status === 'done') out.done = { results: engine.ranking(s) };
   return out;
 }
 

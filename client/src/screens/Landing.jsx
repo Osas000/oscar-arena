@@ -16,7 +16,7 @@ export default function Landing() {
       </motion.div>
 
       <motion.h1 initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-        className="text-center text-5xl font-black tracking-tight text-white sm:text-6xl">
+        className="px-2 text-center text-4xl font-black tracking-tight text-white sm:text-6xl">
         OSCAR <span className="text-arena-gold">ARENA</span>
       </motion.h1>
       <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
@@ -41,7 +41,7 @@ export default function Landing() {
         </motion.button>
       </div>
 
-      <p className="absolute bottom-6 text-xs text-white/30">
+      <p className="absolute bottom-2 px-4 text-center text-xs leading-relaxed text-white/30 safe-bottom sm:bottom-6">
         Free for Royal Rangers · works on any phone · designed for offline-ish networks
       </p>
     </div>

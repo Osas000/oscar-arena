@@ -27,11 +27,20 @@ export default function PlayerGame({ onLeave }) {
   useEffect(() => {
     if (phase !== 'question' || answered || !deadline) return;
     const id = setInterval(() => {
-      const remain = Math.ceil((deadline - Date.now()) / 1000);
+      const remain = Math.ceil((deadline - (Date.now() + s.serverOffset)) / 1000);
       if (remain <= 5 && remain > 0) tick();
     }, 1000);
     return () => clearInterval(id);
-  }, [phase, answered, deadline]);
+  }, [phase, answered, deadline, s.serverOffset]);
+
+  // Hard fairness gate: the ✓/✗/highlight/dim may only appear once the
+  // SERVER-adjusted clock has reached the question deadline. A phone whose
+  // clock is behind the server would otherwise display the reveal (which the
+  // server broadcasts right after the deadline) while its own timer still
+  // shows seconds remaining — the exact 'hint before the timer finished'
+  // behaviour players complained about. Until then, keep the waiting state.
+  const serverNow = Date.now() + s.serverOffset;
+  const revealReady = !deadline || serverNow >= deadline;
 
   return (
     <div className="flex min-h-screen flex-col items-center px-4 py-6">
@@ -69,27 +78,27 @@ export default function PlayerGame({ onLeave }) {
         {/* ---------------- COUNTDOWN (start of game) ---------------- */}
         {phase === 'countdown' && (
           <motion.div key="countdown" className="flex flex-1 flex-col items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <Countdown deadline={s.countdownDeadline} />
+            <Countdown deadline={s.countdownDeadline} serverOffset={s.serverOffset} />
           </motion.div>
         )}
 
         {/* ---------------- QUESTION / ANSWER ---------------- */}
-        {(phase === 'question' || (phase === 'reveal' && !myResult)) && question && (
+        {(phase === 'question' || (phase === 'reveal' && !myResult) || (phase === 'reveal' && myResult && !revealReady)) && question && (
           <motion.div key="q" className="flex w-full flex-1 flex-col items-center" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -24 }}>
             <div className="mb-2 text-sm font-semibold text-white/50">
               Question {question.index + 1} of {question.total}
             </div>
-            <h1 className="mb-4 text-center text-2xl font-extrabold text-white sm:text-3xl">{question.prompt}</h1>
+            <h1 className="mb-4 max-w-full break-words text-center text-2xl font-extrabold text-white sm:text-3xl">{question.prompt}</h1>
 
             {!answered && phase === 'question' ? (
               <>
-                <div className="mb-6 w-full"><TimerBar deadline={question.deadline} totalMs={question.timeLimit * 1000} /></div>
+                <div className="mb-6 w-full"><TimerBar deadline={question.deadline} totalMs={question.timeLimit * 1000} serverOffset={s.serverOffset} /></div>
                 <AnswerTiles options={question.options} onPick={(c) => s.answer(c)} myChoice={myChoice} />
               </>
             ) : (
               <motion.div className="flex flex-col items-center py-16" initial={{ scale: 0.6 }} animate={{ scale: 1 }}>
                 <motion.div animate={{ scale: [1, 1.15, 1] }} transition={{ repeat: Infinity, duration: 1.2 }} className="mb-4 text-6xl">⏳</motion.div>
-                <p className="text-xl font-bold text-white">Answer locked in!</p>
+                <p className="text-xl font-bold text-white">{myResult ? 'Checking…' : 'Answer locked in!'}</p>
                 <p className="mt-1 text-white/60">Waiting for everyone else…</p>
               </motion.div>
             )}
@@ -97,7 +106,7 @@ export default function PlayerGame({ onLeave }) {
         )}
 
         {/* ---------------- REVEAL (my result) ---------------- */}
-        {phase === 'reveal' && myResult && question && (
+        {phase === 'reveal' && myResult && revealReady && question && (
           <motion.div
             key="reveal"
             className={`flex w-full flex-1 flex-col items-center ${myResult.correct ? '' : 'game-over'}`}
@@ -177,8 +186,13 @@ export default function PlayerGame({ onLeave }) {
         {/* ---------------- DONE ---------------- */}
         {phase === 'done' && (
           <motion.div key="done" className="flex flex-1 flex-col items-center justify-center text-center px-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <div className="mb-4 text-6xl">{s.kicked ? '🚫' : '🏁'}</div>
-            <h2 className="text-3xl font-black text-white">{s.kicked ? 'You were removed' : 'Game Over'}</h2>
+            <div className="mb-4 text-6xl">{s.kicked ? '🚫' : s.done?.reason === 'host' ? '🔚' : '🏁'}</div>
+            <h2 className="text-3xl font-black text-white">
+              {s.kicked ? 'You were removed' : s.done?.reason === 'host' ? 'Session Ended' : 'Game Over'}
+            </h2>
+            {s.done?.reason === 'host' && (
+              <p className="mt-2 text-white/70">The host ended this session.</p>
+            )}
             {!s.kicked && s.done?.results && (
               <div className="mt-4">
                 <p className="text-white/70">Final score: <span className="font-mono text-2xl font-black text-arena-gold">{total.toLocaleString()}</span></p>

@@ -1,14 +1,19 @@
 // Server-authoritative countdown: derives remaining time from the server's
 // `deadline` timestamp, so a bad phone clock can't skew the game.
+// `serverOffset` (serverTime - clientTime, captured when the question payload
+// arrived) is subtracted from the client clock so even a phone whose clock is
+// seconds behind the server shows the exact same remaining time as everyone
+// else — and never sees the ✓/✗ reveal before its own timer hits zero.
 import { useEffect, useRef, useState } from 'react';
 
-export default function TimerBar({ deadline, totalMs, onExpire }) {
-  const [remaining, setRemaining] = useState(() => Math.max(0, deadline - Date.now()));
+export default function TimerBar({ deadline, totalMs, serverOffset = 0, onExpire }) {
+  const now = () => Date.now() + serverOffset;
+  const [remaining, setRemaining] = useState(() => Math.max(0, deadline - now()));
   const fired = useRef(false);
 
   useEffect(() => {
     const id = setInterval(() => {
-      const r = Math.max(0, deadline - Date.now());
+      const r = Math.max(0, deadline - now());
       setRemaining(r);
       if (r <= 0 && !fired.current) {
         fired.current = true;
@@ -16,7 +21,7 @@ export default function TimerBar({ deadline, totalMs, onExpire }) {
       }
     }, 100);
     return () => clearInterval(id);
-  }, [deadline]);
+  }, [deadline, serverOffset]);
 
   const frac = totalMs > 0 ? Math.min(remaining / totalMs, 1) : 0;
   const secs = Math.ceil(remaining / 1000);

@@ -22,6 +22,7 @@ export const useHost = create((set, get) => ({
   phase: 'idle',        // idle | lobby | countdown | question | reveal | scoreboard | podium | done
   question: null,
   countdownDeadline: null,
+  serverOffset: 0,
   reveal: null,
   answeredCount: 0,
   playerCount: 0,
@@ -90,13 +91,37 @@ export const useHost = create((set, get) => ({
     set({ socket });
     socket.onAny((evt, payload) => console.log('[HOST-EVT]', evt, JSON.stringify(payload)?.slice(0, 120)));
 
-    socket.on('connect', () => set({ connected: true, error: null }));
+    socket.on('connect', () => {
+      set({ connected: true, error: null });
+      // Socket.IO reconnects transparently after a network blip — the server
+      // sees a fresh socket.id, so re-attach our host identity to the live
+      // session (also cancels the server's host-lost auto-end timer).
+      const { live } = get();
+      if (live) {
+        socket.emit('host:join', { sessionId: live.id, adminPin: get().adminPin }, (res) => {
+          if (!res?.ok) set({ error: res?.error || 'Reconnect failed' });
+        });
+      }
+    });
     socket.on('disconnect', () => set({ connected: false }));
     socket.on('connect_error', (e) => set({ error: e.message }));
 
-    socket.on('phase', (p) => { console.log('[PHASE-SET]', p.phase); set({ phase: p.phase }); });
-    socket.on('countdown', (c) => set({ countdownDeadline: c.deadline, phase: 'countdown' }));
-    socket.on('question', (q) => set({ question: q, answeredCount: 0, countdownDeadline: null, phase: 'question' }));
+    socket.on('phase', (p) => {
+      // 'done' arrives with its payload via the 'done' event right after.
+      // Setting phase alone here would render an empty scene and can race
+      // AnimatePresence (mode="wait") — the done block never mounts.
+      if (p.phase === 'done') return;
+      console.log('[PHASE-SET]', p.phase);
+      set({ phase: p.phase });
+    });
+    socket.on('countdown', (c) => set({
+      countdownDeadline: c.deadline,
+      serverOffset: c.serverTime - Date.now(),
+      phase: 'countdown',
+    }));
+    socket.on('question', (q) => set({
+      question: q, answeredCount: 0, countdownDeadline: null, serverOffset: q.serverTime - Date.now(), phase: 'question',
+    }));
     socket.on('answer_received', (d) => set({ answeredCount: d.answeredCount, playerCount: d.playerCount, players: playersFrom(d) }));
     socket.on('player_joined', (d) => {
       set((s) => ({ playerCount: s.playerCount + 1, players: [...s.players.filter((p) => p.id !== d.player.id), d.player] }));
@@ -139,6 +164,7 @@ export const useHost = create((set, get) => ({
           reveal: s.correctChoice !== undefined ? { correctChoice: s.correctChoice, distribution: s.distribution } : null,
           scoreboard: s.scoreboard || null,
           podium: s.podium || null,
+          done: s.done || null,
           answeredCount: s.answeredCount || 0,
           playerCount: s.playerCount || 0,
           players: s.players || [],
@@ -169,7 +195,7 @@ export const useHost = create((set, get) => ({
     if (s) s.disconnect();
     set({
       socket: null, connected: false, live: null, phase: 'idle', question: null,
-      countdownDeadline: null, reveal: null, answeredCount: 0, playerCount: 0, scoreboard: null, podium: null,
+      countdownDeadline: null, serverOffset: 0, reveal: null, answeredCount: 0, playerCount: 0, scoreboard: null, podium: null,
       done: null, locked: false, players: [], error: null,
     });
   },

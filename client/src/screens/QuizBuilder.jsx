@@ -74,7 +74,7 @@ export default function QuizBuilder({ quizId, onBack, onHost }) {
 
   return (
     <div className="min-h-screen px-4 py-6">
-      <header className="mb-6 flex items-center justify-between gap-2">
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-x-2 gap-y-3">
         <div className="flex min-w-0 items-center gap-3">
           <Logo size={40} />
           <div className="min-w-0 flex-1">
@@ -82,7 +82,7 @@ export default function QuizBuilder({ quizId, onBack, onHost }) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Quiz title"
-              className="w-full bg-transparent text-lg font-extrabold text-white outline-none placeholder:text-white/40"
+              className="w-full bg-transparent text-base font-extrabold text-white outline-none placeholder:text-white/40 sm:text-lg"
             />
             <p className="text-xs text-white/50">{questions.length} question{questions.length === 1 ? '' : 's'}</p>
           </div>
@@ -90,7 +90,7 @@ export default function QuizBuilder({ quizId, onBack, onHost }) {
         <div className="flex shrink-0 gap-2">
           <button onClick={onBack} className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white/70 hover:bg-white/20">Back</button>
           <motion.button whileTap={{ scale: 0.95 }} onClick={save} disabled={saving}
-            className="rounded-lg bg-arena-gold px-4 py-1.5 text-sm font-bold text-arena-navy hover:brightness-110 disabled:opacity-60">
+            className="whitespace-nowrap rounded-lg bg-arena-gold px-3 py-1.5 text-sm font-bold text-arena-navy hover:brightness-110 disabled:opacity-60 sm:px-4">
             {saving ? 'Saving…' : 'Save & Host'}
           </motion.button>
         </div>

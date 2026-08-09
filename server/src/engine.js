@@ -199,6 +199,7 @@ export function hostAttach(sessionId, socketId, adminPin) {
   const session = liveSessions.get(sessionId);
   if (!session) throw new Error('Session not found');
   if (adminPin !== expectedAdminPin()) throw new Error('Invalid admin PIN');
+  cancelHostLostEnd(sessionId);
   session.hostSocketId = socketId;
   session.sockets.set(socketId, { role: 'host' });
   return session;
@@ -209,6 +210,32 @@ export function hostDetach(sessionId, socketId) {
   if (!session) return;
   if (session.hostSocketId === socketId) session.hostSocketId = null;
   session.sockets.delete(socketId);
+}
+
+// ---------------------------------------------------------------------------
+// Host-loss auto-end: if the host's socket dies (tab closed / app killed) the
+// session must NOT linger as a zombie. Schedule an end; a reconnecting host
+// (host:join) cancels it within the grace window.
+// ---------------------------------------------------------------------------
+const hostLostTimers = new Map(); // sessionId -> timer id
+const HOST_LOST_GRACE_MS = () => Number(process.env.HOST_LOST_GRACE_MS) || 15000;
+
+export function scheduleHostLostEnd(sessionId) {
+  const session = liveSessions.get(sessionId);
+  if (!session || session.status === 'done') return;
+  cancelHostLostEnd(sessionId);
+  const t = setTimeout(() => {
+    hostLostTimers.delete(sessionId);
+    const s = liveSessions.get(sessionId);
+    // Only auto-end if it's still mid-flight; a done session is already ended.
+    if (s && s.status !== 'done' && !s.hostSocketId) endSession(sessionId);
+  }, HOST_LOST_GRACE_MS());
+  hostLostTimers.set(sessionId, t);
+}
+
+export function cancelHostLostEnd(sessionId) {
+  const t = hostLostTimers.get(sessionId);
+  if (t) { clearTimeout(t); hostLostTimers.delete(sessionId); }
 }
 
 // ------------------------------ Player join --------------------------------
@@ -279,8 +306,15 @@ export function playerDisconnect(sessionId, socketId) {
 export function playerDisconnectAny(socketId) {
   for (const session of liveSessions.values()) {
     if (session.sockets.has(socketId)) {
+      const entry = session.sockets.get(socketId);
       playerDisconnect(session.id, socketId);
-      return;
+      // A dead host socket must not leave the session to rot: auto-end after a
+      // grace window so every connected player gets a terminal state instead
+      // of an eternal 'waiting for the host…'. A rejoin cancels it (hostAttach).
+      if (entry?.role === 'host' && session.status !== 'done') {
+        scheduleHostLostEnd(session.id);
+      }
+      return; // a socket belongs to exactly one session
     }
   }
 }
@@ -311,6 +345,16 @@ export function setLobbyLocked(sessionId, locked) {
 // Countdown shown to everyone before the FIRST question after the host hits
 // Start. (Between-question transitions stay instant for pace.)
 // Read lazily so tests can override it after import.
+// Phase hold durations (ms). Env-tunable so the stress harness can compress a
+// 2500-question marathon to minutes without touching production defaults.
+const holdMs = (env, def) => {
+  const v = Number(process.env[env]);
+  return Number.isFinite(v) && v > 0 ? v : def;
+};
+const revealHoldMs = () => holdMs('REVEAL_HOLD_MS', 4000);
+const scoreboardHoldMs = () => holdMs('SCOREBOARD_HOLD_MS', 8000);
+const podiumHoldMs = () => holdMs('PODIUM_HOLD_MS', 20000);
+
 const countdownMs = () => Number(process.env.COUNTDOWN_MS) || 5000;
 
 export function startGame(sessionId) {
@@ -326,7 +370,7 @@ export function startGame(sessionId) {
   session.countdownDeadline = Date.now() + countdownMs();
 
   publish(session, 'all', 'phase', { phase: 'countdown' });
-  publish(session, 'all', 'countdown', { deadline: session.countdownDeadline });
+  publish(session, 'all', 'countdown', { deadline: session.countdownDeadline, serverTime: Date.now() });
 
   // Auto-open Q1 after the countdown. Guard so a manual end/next doesn't race.
   defer(session, countdownMs(), () => {
@@ -369,12 +413,16 @@ function openQuestion(session) {
     prompt: q.prompt,
     timeLimit: q.time_limit,
     deadline: session.liveRound.deadline,
+    serverTime: session.liveRound.startedAt,
     options: q.options.map((o, i) => ({ id: i, text: o.text })),
   });
 
   // The deadline is authoritative; this timer just closes the round for everyone
-  // (including clients whose network stalled). +800ms grace for delivery.
-  defer(session, totalMs + 800, () => {
+  // (including clients whose network stalled). The +grace keeps the question
+  // briefly open after the deadline so slow clients' answers still count
+  // (network jitter is not cheating). Env-tunable for the stress marathon.
+  const answerGraceMs = () => holdMs('ANSWER_GRACE_MS', 800);
+  defer(session, totalMs + answerGraceMs(), () => {
     const cur = liveSessions.get(session.id);
     if (cur && cur.liveRound?.questionId === q.id && cur.status === 'question') {
       closeQuestion(session);
@@ -475,7 +523,7 @@ function closeQuestion(session) {
 
   // Hold reveal ~4s first so the host sees the answer distribution and players
   // see their own result before the leaderboard replaces it.
-  defer(session, 4000, () => {
+  defer(session, revealHoldMs(), () => {
     const cur = liveSessions.get(session.id);
     if (cur && cur.status === 'reveal') {
       cur.status = 'scoreboard';
@@ -484,7 +532,7 @@ function closeQuestion(session) {
       publish(cur, 'all', 'scoreboard', { top });
       publish(cur, 'all', 'phase', { phase: 'scoreboard' });
       // Auto-advance after a beat so the host can also click Next manually.
-      defer(cur, 8000, () => {
+      defer(cur, scoreboardHoldMs(), () => {
         const s2 = liveSessions.get(session.id);
         if (s2 && s2.status === 'scoreboard') {
           if (s2.questionIndex + 1 < s2.quiz.questions.length) {
@@ -508,7 +556,7 @@ function finishGame(session) {
   );
 
   clearSessionTimers(session);
-  defer(session, 20000, () => {
+  defer(session, podiumHoldMs(), () => {
     const cur = liveSessions.get(session.id);
     if (cur && cur.status === 'podium') {
       cur.status = 'done';
@@ -533,13 +581,17 @@ export function ranking(session) {
 export function endSession(sessionId) {
   const session = liveSessions.get(sessionId);
   if (!session) return;
+  cancelHostLostEnd(sessionId);
   clearSessionTimers(session);
   session.status = 'done';
   db.prepare('UPDATE sessions SET status = ?, ended_at = ? WHERE id = ?').run(
     'done', Math.floor(Date.now() / 1000), session.id
   );
+  // Publish the payload FIRST, then the phase — clients render the done
+  // block atomically; a bare phase:'done' (no results yet) would leave
+  // AnimatePresence stuck on the podium exit.
+  publish(session, 'all', 'done', { results: ranking(session), ended: true, reason: 'host' });
   publish(session, 'all', 'phase', { phase: 'done' });
-  publish(session, 'all', 'done', { results: ranking(session) });
 }
 
 /** Snapshot of everything a reconnecting player needs to redraw the UI. */
@@ -564,6 +616,7 @@ export function playerStateSnapshot(session, playerId) {
         prompt: q.prompt,
         timeLimit: q.time_limit,
         deadline: round?.deadline ?? 0,
+        serverTime: round?.startedAt ?? 0,
         options: q.options.map((o, i) => ({ id: i, text: o.text })),
       };
     }

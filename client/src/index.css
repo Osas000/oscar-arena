@@ -28,6 +28,43 @@ body {
   background: radial-gradient(1200px 600px at 50% -10%, #14306b 0%, var(--qa-navy) 45%, var(--qa-navy-deep) 100%);
   color: var(--qa-text);
   overflow-x: hidden;
+  /* Keep the app usable when the browser rotates or the URL bar resizes */
+  min-height: 100dvh;
+}
+
+/* Mobile-first: every screen that asks for 100vh should really fill the
+   dynamic viewport (the visible area below the mobile URL bar), otherwise
+   centered content sits cut off below the fold on phones. */
+@supports (min-height: 100dvh) {
+  .min-h-screen {
+    min-height: 100dvh;
+  }
+  html, body, #root {
+    min-height: 100dvh;
+  }
+}
+
+/* Kill the 300ms double-tap zoom delay + accidental zoom on rapid taps */
+button, [role="button"], input, a {
+  touch-action: manipulation;
+}
+
+/* Prevent iOS Safari from auto-zooming into inputs with font-size < 16px
+   (only applies on the fine mobile widths; desktop unaffected) */
+@media (max-width: 767px) {
+  input, textarea, select {
+    font-size: 16px;
+  }
+}
+
+/* Notched phones: never clip content against the home indicator */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom), 0px);
+  }
+  .safe-top {
+    padding-top: max(env(safe-area-inset-top), 0px);
+  }
 }
 
 /* Big clown-friendly number display for the countdown */

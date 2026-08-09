@@ -1,22 +1,25 @@
 // Full-screen animated countdown shown to host + players right before Q1,
 // driven by the authoritative server deadline so everyone stays in sync.
+// `serverOffset` cancels device clock skew (see TimerBar): every phone shows
+// the same 3-2-1 regardless of its own clock.
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { tick } from '../lib/audio.js';
 
-export default function Countdown({ deadline }) {
-  const [n, setN] = useState(() => Math.max(1, Math.ceil((deadline - Date.now()) / 1000)));
+export default function Countdown({ deadline, serverOffset = 0 }) {
+  const now = () => Date.now() + serverOffset;
+  const [n, setN] = useState(() => Math.max(1, Math.ceil((deadline - now()) / 1000)));
 
   useEffect(() => {
     if (!deadline) return;
-    setN(Math.max(1, Math.ceil((deadline - Date.now()) / 1000)));
+    setN(Math.max(1, Math.ceil((deadline - now()) / 1000)));
     const id = setInterval(() => {
-      const remain = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      const remain = Math.max(0, Math.ceil((deadline - now()) / 1000));
       setN(remain);
       if (remain > 0) tick();
     }, 1000);
     return () => clearInterval(id);
-  }, [deadline]);
+  }, [deadline, serverOffset]);
 
   const display = n <= 0 ? 'GO!' : n;
 

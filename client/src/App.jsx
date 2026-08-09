@@ -61,7 +61,7 @@ export default function App() {
       }
 
       if (host.live && host.phase !== 'idle') {
-        return <HostLive onExit={() => { host.destroy(); go('/host'); }} />;
+        return <HostLive onExit={() => { host.end(); host.destroy(); go('/host'); }} />;
       }
 
       return (

@@ -45,17 +45,17 @@ export default function HostDashboard({ onOpenBuilder, onHost }) {
 
   return (
     <div className="min-h-screen px-4 py-6">
-      <header className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-x-3 gap-y-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Logo size={44} />
-          <div>
-            <h1 className="text-xl font-extrabold text-white">Quiz Library</h1>
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-extrabold text-white">Quiz Library</h1>
             <p className="text-xs text-white/50">Host console</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowPinModal(true)} className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white/70 hover:bg-white/20">🔒 Change PIN</button>
-          <button onClick={logout} className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white/70 hover:bg-white/20">Sign out</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => setShowPinModal(true)} className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-white/70 hover:bg-white/20 sm:text-sm">🔒 Change PIN</button>
+          <button onClick={logout} className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-white/70 hover:bg-white/20 sm:text-sm">Sign out</button>
         </div>
       </header>
 
@@ -71,7 +71,7 @@ export default function HostDashboard({ onOpenBuilder, onHost }) {
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
           placeholder="New quiz title…"
-          className="flex-1 rounded-xl border-2 border-white/15 bg-white/5 px-4 py-2.5 text-white outline-none focus:border-arena-gold"
+          className="min-w-0 flex-1 rounded-xl border-2 border-white/15 bg-white/5 px-4 py-2.5 text-white outline-none focus:border-arena-gold"
         />
         <motion.button whileTap={{ scale: 0.96 }} disabled={creating || !newTitle.trim()} className="rounded-xl bg-arena-gold px-5 py-2.5 font-bold text-arena-navy hover:brightness-110 disabled:opacity-50">
           + Create
@@ -89,9 +89,9 @@ export default function HostDashboard({ onOpenBuilder, onHost }) {
       <div className="space-y-3">
         {quizzes.map((q, i) => (
           <motion.div key={q.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-            className="flex items-center gap-3 rounded-2xl bg-white/5 p-4">
-            <div className="flex-1">
-              <div className="font-bold text-white">{q.title}</div>
+            className="flex flex-wrap items-center gap-2 rounded-2xl bg-white/5 p-4 sm:gap-3">
+            <div className="min-w-0 flex-1 basis-40">
+              <div className="truncate font-bold text-white">{q.title}</div>
               <div className="text-xs text-white/50">{q.questionCount} question{q.questionCount === 1 ? '' : 's'}</div>
             </div>
             <button onClick={() => onOpenBuilder(q.id)} className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white/80 hover:bg-white/20">

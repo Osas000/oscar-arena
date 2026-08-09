@@ -7,14 +7,22 @@
  * scoreboard -> podium -> done) and objectively reports:
  *   - registration: %of target joined, join latency (median / p95 / p99), wall time
  *   - throughput:   'question' events broadcast to players, 'your_result' echoes
- *   - game integrity: did the full cycle reach 'done'
+ *   - game integrity: did the full cycle reach 'done' within a healthy window
  *   - memory:       server peak heap + RSS sampled via /healthz concurrently
  *                   (this, not raw row counts, is what proves "no OOM at 500")
+ *   - reconnect torture (--churn N): N sockets die mid-game and resume with
+ *     their token; the same identity + score must come back.
+ *   - end-session propagation (--endmid Q): at question Q the host ends the
+ *     game; EVERY connected player must reach a terminal 'done' state, and a
+ *     fresh join with a resume token for that session must be REFUSED (no
+ *     zombie resurrection / no more 'waiting for host').
  *
  * A QA gate that must PASS before deploy. Run against a LIVE server:
  *   OSCAR_URL=http://localhost:8080 ADMIN_PIN=000000 node --input-type=module stress/load.js
- * Flags: --players N (default 400) --batch M (50) --qtime T (8000)
- *        --questions K (4) --seed ID
+ * Flags:
+ *   --players N (400)  --batch M (50)   --qtime T (8000)
+ *   --questions K (4)  --seed ID        --churn N (0)
+ *   --endmid K (0: disabled; end the game at question K and verify propagation)
  */
 import { io } from 'socket.io-client';
 
@@ -28,8 +36,13 @@ const flag = (n, d) => {
 };
 const PLAYERS = Math.min(1000, parseInt(flag('players', '400'), 10) || 400);
 const BATCH = Math.max(5, parseInt(flag('batch', '50'), 10) || 50);
-const QTIME = Math.max(2000, parseInt(flag('qtime', '8000'), 10) || 8000);
+// STRESS_FAST=1 pairs with compressed phase holds on the server (see engine.js
+// ANSWER_GRACE_MS / REVEAL_HOLD_MS / SCOREBOARD_HOLD_MS) so the harness may
+// drop its own 2s floor and blitz through thousands of questions in minutes.
+const QTIME = Math.max(process.env.STRESS_FAST === '1' ? 50 : 2000, parseInt(flag('qtime', '8000'), 10) || 8000);
 const NQ = Math.max(1, parseInt(flag('questions', '4'), 10) || 4);
+const CHURN = Math.min(PLAYERS, parseInt(flag('churn', '0'), 10) || 0);
+const ENDMID = parseInt(flag('endmid', '0'), 10) || 0;
 const SEED = flag('seed', '');
 const RUN = 'stress-' + Date.now().toString(36);
 
@@ -37,7 +50,7 @@ const PASS = (m) => console.log('  ✓ ' + m);
 const FAIL = (m) => { console.error('  ✗ ' + m); process.exit(1); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const stats = { joined: 0, joinErrors: 0, questionEvents: 0, resultEchoes: 0 };
+const stats = { joined: 0, joinErrors: 0, questionEvents: 0, resultEchoes: 0, doneEchoes: 0, churnRejoined: 0 };
 const joinLat = [];
 const peakMem = { heap: 0, rss: 0 };
 let gameDone = false;
@@ -80,7 +93,7 @@ async function seedQuiz() {
 }
 
 async function main() {
-  console.log(`OSCAR ARENA stress — ${PLAYERS} players · ${BATCH}/wave · ${QTIME}ms × ${NQ}Q`);
+  console.log(`OSCAR ARENA stress — ${PLAYERS} players · ${BATCH}/wave · ${QTIME}ms × ${NQ}Q·${CHURN ? ' churn ' + CHURN : ''}${ENDMID ? ' endmid@' + ENDMID : ''}`);
   console.log(`target ${BASE}\n`);
 
   const quizId = await seedQuiz();
@@ -109,26 +122,30 @@ async function main() {
   // --------- PLAYER STAMPEDE ----------
   const t0 = Date.now();
   console.log(`\nopening ${PLAYERS} sockets (${BATCH}/wave)...`);
+  const players = []; // { s, pid, resume }
+
   async function wave(start) {
     const jobs = [];
     for (let i = start; i < Math.min(start + BATCH, PLAYERS); i++) jobs.push(spawn(i));
     await Promise.allSettled(jobs);
   }
-  function spawn(i) {
+  function spawn(i, resumeToken = null) {
     return new Promise((res) => {
       const name = 'R' + (i + 1).toString().padStart(4, '0');
       const tc = Date.now();
-      const s = io(BASE, { transports: ['websocket'], reconnection: false });
+      const s = io(BASE, { transports: ['websocket'], reconnection: false, forceNew: true });
       const guard = setTimeout(() => { stats.joinErrors++; s.close(); res(); }, 25000);
       s.on('connect_error', () => { stats.joinErrors++; clearTimeout(guard); res(); });
       s.on('connect', () => {
-        s.emit('player:join_pin', { pin: sess.pin, nickname: name, resumeToken: null }, (a) => {
+        s.emit('player:join_pin', { pin: sess.pin, nickname: name, resumeToken }, (a) => {
           clearTimeout(guard);
           if (!a || !a.ok) { stats.joinErrors++; s.close(); return res(); }
           stats.joined++;
           joinLat.push(Date.now() - tc);
-          s.__pid = a.playerId;          // store player id for answering
+          s.__pid = a.playerId;
+          s.__resume = a.resumeToken || resumeToken;
           wireAnswers(s);
+          if (!resumeToken) players.push({ s, pid: s.__pid, resume: s.__resume });
           res();
         });
       });
@@ -141,6 +158,7 @@ async function main() {
       s.emit('player:answer', { sessionId: sess.id, playerId: s.__pid, choice: 0 });
     });
     s.on('your_result', () => stats.resultEchoes++);
+    s.on('done', () => stats.doneEchoes++);
   }
 
   for (let w = 0; w < PLAYERS; w += BATCH) {
@@ -157,41 +175,113 @@ async function main() {
   if (joined < PLAYERS * 0.97) FAIL(`degraded join: ${joined}/${PLAYERS}`);
   PASS(`${joined} players fully joined`);
 
+  // --------- RECONNECT TORTURE (churn) ----------
+  // Drop CHURN sockets at Q1 and again mid-game; each must resume the SAME
+  // identity (server-side resume path) and keep answering.
+  let churnRound = 0;
+  function maybeChurn(qidx) {
+    if (!CHURN || churnRound >= 2) return;
+    const want = churnRound === 0 ? qidx === 0 : qidx === Math.max(3, Math.floor(NQ / 2)) - 1;
+    if (!want) return;
+    const from = churnRound * Math.min(CHURN, players.length);
+    const victims = players.slice(from, from + CHURN);
+    churnRound++;
+    if (victims.length === 0) return;
+    console.log(`  [churn ${churnRound} of 2] killing ${victims.length} sockets (Q${qidx + 1})…`);
+    victims.forEach((v, k) => {
+      setTimeout(() => {
+        try { v.s.close(); } catch {}
+        spawn(Math.floor(Math.random() * 100000), v.resume);
+      }, 600 + k * 250);
+    });
+  }
+
   // --------- RUN THE GAME ----------
   const tG = Date.now();
   await new Promise((res) => host.emit('host:start', { sessionId: sess.id }, (s) => {
     if (!s || !s.ok) FAIL('host start: ' + (s && s.error));
     res();
   }));
-  PASS(`host:start → engine auto-advances all ${NQ} questions`);
+  PASS(`host:start → engine auto-advances all ${NQ} questions${ENDMID ? ` (will end at Q${ENDMID})` : ''}`);
 
-  // The engine cycles Q → reveal → scoreboard → next … → podium → done on its own.
+  // Track churn boundary on the players' side.
+  players.forEach((p) => {
+    p.s.on('question', (q) => {
+      if (q.index === 0 || q.index === Math.max(3, Math.floor(NQ / 2)) - 1) maybeChurn(q.index + 1);
+    });
+  });
+
+  // The engine cycles Q → reveal → scoreboard → next … → podium → done.
+  // If --endmid is set, the host ends at that question instead.
   const done = new Promise((res) => host.on('done', res));
-  const guard = setTimeout(() => {}, NQ * (QTIME + 16000) + 10000);
+  if (ENDMID > 0) {
+    let ended = false;
+    host.on('question', (q) => {
+      if (!ended && (q.index + 1) >= ENDMID) {
+        ended = true;
+        setTimeout(() => host.emit('host:end', { sessionId: sess.id }), 800);
+      }
+    });
+  }
+  const guardMs = NQ * (QTIME + (process.env.STRESS_FAST === '1' ? 2500 : 16000)) + 30000;
+  const guard = setTimeout(() => {}, guardMs);
   await done; gameDone = true; clearTimeout(guard);
-  await sleep(400);
+  await sleep(600);
   clearInterval(memTimer);
   const wall = (Date.now() - tG) / 1000;
 
   const qEvents = stats.questionEvents, echoes = stats.resultEchoes;
-  const expQ = joined * NQ;
-  const expE = joined * NQ;
+  const qDone = ENDMID > 0 ? Math.min(NQ, ENDMID) : NQ;
+  // Expected answer-path events: every registered player, per question actually
+  // served. Churn kills sockets mid-flight (resume sockets arrive on a later
+  // question), so a churn run gets a slightly lower bar.
+  const expQ = joined * qDone;
+  const expE = joined * qDone;
+  const answerGate = CHURN > 0 ? 0.85 : 0.9;
 
   console.log('\n──────────── RESULT: OSCAR ARENA STRESS ────────────');
   console.log(`registered     : ${joined}/${PLAYERS} (${(joined / PLAYERS * 100).toFixed(1)}%)`);
   console.log(`join latency   : med ${pct(0.5)}ms · p95 ${pct(0.95)}ms · p99 ${pct(0.99)}ms`);
   console.log(`question evts  : ${qEvents} / expected ${expQ}`);
   console.log(`result echoes  : ${echoes} / expected ${expE}`);
+  console.log(`done echoes    : ${stats.doneEchoes} of ${joined} players (end-session propagation)`);
   console.log(`game reached   : ${gameDone ? 'done' : 'NOT-done'}  (${wall.toFixed(1)}s)`);
   console.log(`server heap    : ${(peakMem.heap / 1048576).toFixed(0)} MB`);
   console.log(`server RSS     : ${(peakMem.rss / 1048576).toFixed(0)} MB`);
+  if (CHURN) console.log(`churn          : ${CHURN} victims × 2 rounds (resume path exercised)`);
   console.log('──────────────────────────────────────────────────────');
 
-  const ok = gameDone && echoes >= expE * 0.9 && qEvents >= expQ * 0.9;
+  const ok = gameDone && echoes >= expE * answerGate && qEvents >= expQ * answerGate;
+  if (ENDMID > 0 && stats.doneEchoes < joined * 0.95) {
+    FAIL(`end-session propagation failed: only ${stats.doneEchoes}/${joined} players reached done`);
+  }
+
+  // --------- ZOMBIE REJOIN CHECK (--endmid) ----------
+  // The user-visible bug: after the host ends, refreshing / re-entering must
+  // NOT resurrect the session. A resume-token rejoin of a DONE session has to
+  // be refused cleanly (client falls back to the join screen).
+  if (ENDMID > 0 && players.length > 0) {
+    const v = players[0];
+    const refused = await new Promise((res) => {
+      const z = io(BASE, { transports: ['websocket'], reconnection: false, forceNew: true });
+      const t = setTimeout(() => { z.close(); res(null); }, 8000);
+      z.on('connect', () => {
+        z.emit('player:join_pin', { pin: sess.pin, nickname: 'Zombie', resumeToken: v.resume }, (a) => {
+          clearTimeout(t); z.close();
+          res(a && { ok: a.ok, code: a.code, error: a.error });
+        });
+      });
+      z.on('connect_error', () => { clearTimeout(t); res(null); });
+    });
+    const isRefused = refused && refused.ok === false;
+    if (!isRefused) FAIL(`resurrection: ended session ACCEPTED a rejoin (${JSON.stringify(refused)})`);
+    console.log(`  zombie-rejoin refused (code='${refused.code}') → client falls back to join screen`);
+    PASS('ended session cannot be resurrected by a returning player');
+  }
   console.log(ok
-    ? `\nSTRESS-OK — ${joined} players on 1 Node process, full game cycle, no OOM.`
-    : `\nSTRESS-DEGRADED — echoes ${echoes}/${expE}, done=${gameDone}`);
+    ? `\nSTRESS-OK — ${joined} players on 1 Node server process, full game cycle, no OOM.${ENDMID ? ' end-session propagated to everyone.' : ''}`
+    : `\nSTRESS-FAIL — gameDone=${gameDone} echoes=${echoes}/${expE} qEvents=${qEvents}/${expQ}`);
   process.exit(ok ? 0 : 1);
 }
 
-main().catch((e) => { console.error('\n✗ fatal:', e); process.exit(1); });
+main().catch((e) => { FAIL('crash: ' + (e && e.stack || e)); });

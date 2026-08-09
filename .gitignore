@@ -10,6 +10,7 @@ server/data/
 *.db-journal
 *.db-wal
 *.db-shm
+stress/*.sqlite*
 *.log
 
 # ---- Env & secrets ----
@@ -28,3 +29,6 @@ Thumbs.db
 desktop.ini
 .vscode/
 .idea/debug-*
+
+# QA artifacts
+server/test/qa-artifacts/

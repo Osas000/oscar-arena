@@ -46,6 +46,12 @@ export const usePlayer = create((set, get) => ({
   // --- game state ---
   quizTitle: '',
   countdownDeadline: null,
+  // Server-offset in ms: serverTime - clientTime, captured when the server's
+  // countdown/question payloads arrive. Every client-side countdown subtracts
+  // it, so a phone whose clock is seconds behind the server shows the SAME
+  // remaining time everyone else sees (root of the 'checkmark before timer
+  // finished' and 'question timing differs' reports).
+  serverOffset: 0,
   question: null,       // { index, total, type, prompt, timeLimit, deadline, options }
   myChoice: null,
   myResult: null,       // { correct, choice, correctChoice, points, streak, total }
@@ -55,7 +61,7 @@ export const usePlayer = create((set, get) => ({
   answeredCount: 0,
   scoreboardTop: [],    // top 5 on scoreboard
   podium: null,         // { top3 }
-  done: null,           // { results }
+  done: null,           // { results, ended?, reason? } — reason 'host' when the host ended the session
 
   // --- ui ---
   locked: false,
@@ -89,13 +95,24 @@ export const usePlayer = create((set, get) => ({
 
     // --- server events ---
     socket.on('phase', (p) => {
+      // 'done' is set atomically with its results via the 'done' event;
+      // ignore the bare phase so the done screen doesn't flash empty.
+      if (p.phase === 'done') return;
       set({ phase: p.phase });
       if (p.phase === 'scoreboard') playReveal();
       if (p.phase === 'podium') { playPodium(); confettiBurst(document.body); }
     });
-    socket.on('countdown', (c) => set({ countdownDeadline: c.deadline, phase: 'countdown' }));
+    socket.on('countdown', (c) => set({
+      countdownDeadline: c.deadline,
+      serverOffset: c.serverTime - Date.now(),
+      phase: 'countdown',
+    }));
     socket.on('question', (q) => {
-      set({ question: q, myChoice: null, myResult: null, countdownDeadline: null, phase: 'question' });
+      set({
+        question: q,
+        serverOffset: q.serverTime - Date.now(),
+        myChoice: null, myResult: null, countdownDeadline: null, phase: 'question',
+      });
     });
     socket.on('your_result', (r) => {
       set({ myResult: r, total: r.total, phase: 'reveal' });
@@ -163,9 +180,9 @@ export const usePlayer = create((set, get) => ({
     set({ myChoice: choice });
     playRegister();
     socket.emit('player:answer', { sessionId, playerId, choice }, (res) => {
-      if (!res.ok) {
+      if (!res || !res.ok) {
         // Revert so the player can retry if it was a transient issue.
-        set({ myChoice: null, error: res.reason });
+        set({ myChoice: null, error: res ? res.reason : 'No response' });
       }
     });
   },
@@ -207,6 +224,7 @@ function applySnapshot(st) {
     answeredCount: st.answeredCount,
     quizTitle: st.quizTitle,
     question: st.question,
+    serverOffset: st.question?.serverTime ? st.question.serverTime - Date.now() : 0,
     countdownDeadline: st.countdownDeadline ?? null,
     myResult: set.myResult ?? (st.myAnswer ? { ...st.myAnswer, total: st.total } : null),
     myChoice: st.myAnswer ? st.myAnswer.choice : null,

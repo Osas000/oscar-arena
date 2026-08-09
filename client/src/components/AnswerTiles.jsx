@@ -70,15 +70,15 @@ export default function AnswerTiles({
             animate={isMyPick && !revealed ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
             transition={{ delay: i * 0.06, type: 'spring', stiffness: 300, damping: 18 }}
             onClick={() => !disabled && !revealed && onPick?.(opt.id)}
-            className={`relative flex h-24 flex-col items-center justify-center rounded-2xl text-white shadow-xl transition-all sm:h-28 ${cls} ${revealed ? '' : 'cursor-pointer hover:brightness-110 active:brightness-90'}`}
+            className={`relative flex min-h-24 flex-col items-center justify-center rounded-2xl text-white shadow-xl transition-all sm:min-h-28 ${cls} ${revealed ? '' : 'cursor-pointer hover:brightness-110 active:brightness-90'}`}
             style={{ background: `radial-gradient(circle at 30% 20%, ${t.color}, ${t.color}DD)` }}
             aria-label={opt.text}
           >
             {pickedPulse}
             <span className="absolute left-2.5 top-2 text-2xl opacity-70">{t.label}</span>
-            <span className="flex max-w-[82%] items-center gap-2 text-center text-base font-bold leading-tight drop-shadow sm:text-lg">
+            <span className="flex max-w-[84%] items-center gap-2 text-center text-base font-bold leading-snug drop-shadow sm:text-lg">
               {extra}
-              {opt.text}
+              <span className="break-words whitespace-normal">{opt.text}</span>
             </span>
           </motion.button>
         );
