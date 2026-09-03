@@ -83,7 +83,7 @@ export default function PlayerGame({ onLeave }) {
         {/* ---------------- COUNTDOWN (start of game) ---------------- */}
         {phase === 'countdown' && (
           <motion.div key="countdown" className="flex flex-1 flex-col items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <Countdown deadline={s.countdownDeadline} serverOffset={s.serverOffset} />
+            <Countdown deadline={s.countdownDeadline} serverOffset={s.serverOffset} duration={s.countdownDuration} />
           </motion.div>
         )}
 

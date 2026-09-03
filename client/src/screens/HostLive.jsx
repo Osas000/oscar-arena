@@ -16,7 +16,7 @@ const AVATARS = ['🦊', '🚀', '🦉', '🐉', '🐯', '🦄', '🦅', '⭐', 
 
 export default function HostLive({ onExit }) {
   const h = useHost();
-  const { live, phase, question, reveal, answeredCount, playerCount, scoreboard, podium, done, players, locked, countdownDeadline, serverOffset, error } = h;
+  const { live, phase, question, reveal, answeredCount, playerCount, scoreboard, podium, done, players, locked, countdownDeadline, countdownDuration, serverOffset, error, pending } = h;
   const [full, setFull] = useState(false);
 
   useEffect(() => {
@@ -88,16 +88,16 @@ export default function HostLive({ onExit }) {
                 ))}
               </AnimatePresence>
             </div>
-            <motion.button whileTap={{ scale: 0.96, rotate: canStart ? 0 : 2 }}
-              onClick={() => { if (canStart) h.start(); }}
-              disabled={!canStart}
+            <motion.button whileTap={{ scale: canStart && pending !== 'start' ? 0.96 : 1 }}
+              onClick={() => { if (canStart && !pending) h.start(); }}
+              disabled={!canStart || pending === 'start'}
               className={`mt-10 rounded-2xl px-12 py-4 text-2xl font-black transition-all ${
-                canStart
+                canStart && pending !== 'start'
                   ? 'bg-arena-gold text-arena-navy shadow-2xl shadow-arena-gold/30 hover:brightness-110'
                   : 'cursor-not-allowed bg-white/10 text-white/40'
               }`}
             >
-              {canStart ? 'START ▶' : 'Waiting for players…'}
+              {pending === 'start' ? 'STARTING…' : canStart ? 'START ▶' : 'Waiting for players…'}
             </motion.button>
             {!canStart && <p className="mt-2 text-sm text-white/40">At least one player must join before you can start.</p>}
             {canStart && error && <p className="mt-2 text-sm text-arena-red">{error}</p>}
@@ -108,7 +108,7 @@ export default function HostLive({ onExit }) {
         {phase === 'countdown' && countdownDeadline && (
           <motion.div key="countdown" className="relative z-10 flex flex-1 flex-col items-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <Countdown deadline={countdownDeadline} serverOffset={serverOffset} />
+            <Countdown deadline={countdownDeadline} serverOffset={serverOffset} duration={countdownDuration} />
           </motion.div>
         )}
 
@@ -160,9 +160,12 @@ export default function HostLive({ onExit }) {
               </div>
               <span className="font-mono text-base font-bold text-white sm:text-lg">{answeredCount}/{playerCount}</span>
               {phase === 'reveal' && (
-                <motion.button whileTap={{ scale: 0.95 }} onClick={() => h.next()}
-                  className="ml-auto rounded-xl bg-arena-gold px-5 py-2 text-base font-black text-arena-navy hover:brightness-110 sm:ml-4 sm:px-6 sm:py-2.5 sm:text-lg">
-                  Next ▶
+                <motion.button whileTap={{ scale: pending === 'next' ? 1 : 0.95 }} onClick={() => h.next()}
+                  disabled={pending === 'next'}
+                  className={`ml-auto rounded-xl px-5 py-2 text-base font-black sm:ml-4 sm:px-6 sm:py-2.5 sm:text-lg ${
+                    pending === 'next' ? 'bg-white/10 text-white/50' : 'bg-arena-gold text-arena-navy hover:brightness-110'
+                  }`}>
+                  {pending === 'next' ? '…' : 'Next ▶'}
                 </motion.button>
               )}
             </div>
@@ -206,9 +209,12 @@ export default function HostLive({ onExit }) {
                 );
               })}
             </div>
-            <motion.button whileTap={{ scale: 0.95 }} onClick={() => h.next()}
-              className="mt-8 rounded-2xl bg-arena-gold px-8 py-3 text-lg font-black text-arena-navy hover:brightness-110 sm:mt-10 sm:px-12 sm:py-3.5 sm:text-xl">
-              Next Question ▶
+            <motion.button whileTap={{ scale: pending === 'next' ? 1 : 0.95 }} onClick={() => h.next()}
+              disabled={pending === 'next'}
+              className={`mt-8 rounded-2xl px-8 py-3 text-lg font-black sm:mt-10 sm:px-12 sm:py-3.5 sm:text-xl ${
+                pending === 'next' ? 'bg-white/10 text-white/50' : 'bg-arena-gold text-arena-navy hover:brightness-110'
+              }`}>
+              {pending === 'next' ? '…' : 'Next Question ▶'}
             </motion.button>
           </motion.div>
         )}

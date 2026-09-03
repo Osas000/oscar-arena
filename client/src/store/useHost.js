@@ -42,7 +42,14 @@ export const useHost = create((set, get) => ({
   phase: 'idle',        // idle | lobby | countdown | question | reveal | scoreboard | podium | done
   question: null,
   countdownDeadline: null,
+  countdownDuration: 5, // seconds, from the server countdown payload (clamp source)
   serverOffset: 0,
+  // Which host action is currently in-flight (start|next|finish|end|kick:<id>|lock).
+  // While non-null, re-entry is ignored and buttons show a pending state — this
+  // is what kills the "I have to click 2-3 times before it responds" reports
+  // (double-fires, lost fire-and-forget emits during a reconnect, and the
+  // double-Start countdown reset).
+  pending: null,
   reveal: null,
   answeredCount: 0,
   playerCount: 0,
@@ -155,6 +162,7 @@ export const useHost = create((set, get) => ({
     });
     socket.on('countdown', (c) => set({
       countdownDeadline: c.deadline,
+      countdownDuration: c.duration || 5,
       serverOffset: c.serverTime - Date.now(),
       phase: 'countdown',
     }));
@@ -214,6 +222,12 @@ export const useHost = create((set, get) => ({
       live: res.session,
       phase: s.status || 'lobby',
       countdownDeadline: s.countdownDeadline || null,
+      countdownDuration: s.countdownDuration || 5,
+      // CRITICAL for countdown accuracy on refresh/resume: recalibrate the
+      // clock offset from the snapshot's FRESH serverTime. Without this the
+      // countdown rendered on the raw device clock — a laptop whose clock
+      // runs behind the server showed "6,5,4…" instead of "5,4,3…".
+      serverOffset: s.serverTime ? s.serverTime - Date.now() : get().serverOffset,
       question: s.question || null,
       reveal: s.correctChoice !== undefined ? { correctChoice: s.correctChoice, distribution: s.distribution } : null,
       scoreboard: s.scoreboard || null,
@@ -278,36 +292,76 @@ export const useHost = create((set, get) => ({
     set({ restoring: false });
   },
 
-  start: () => new Promise((resolve) => {
-    const { socket, live } = get();
-    if (!socket || !live) return resolve({ ok: false, error: 'No live session' });
-    socket.emit('host:start', { sessionId: live.id }, (res) => {
-      if (!res?.ok) set({ error: res?.error || 'Could not start' });
-      resolve(res || { ok: false });
+  // Every host control is ack-gated + single-flight:
+  //  - the UI always gets an answer (ok or error) — no more "clicked, nothing
+  //    happened, click again" from emits lost in a reconnecting socket;
+  //  - while `pending` is set, repeated clicks are ignored — no double-fire.
+  // An 8s ack-timeout safety net clears a stuck pending so the host is never
+  // locked out (e.g. the socket died mid-flight).
+  run: (action, send, rollback) => {
+    const { socket, pending } = get();
+    if (!socket || !socket.connected) {
+      set({ error: 'Disconnected — reconnecting…' });
+      return Promise.resolve({ ok: false, error: 'Disconnected' });
+    }
+    if (pending) return Promise.resolve({ ok: false, error: 'Busy', busy: pending });
+    set({ pending: action, error: null });
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (get().pending === action) set({ pending: null });
+        resolve({ ok: false, error: 'Timed out' });
+      }, 8000);
+      send((res) => {
+        clearTimeout(timer);
+        if (res?.ok) {
+          set({ pending: null });
+        } else {
+          set({ pending: null, error: res?.error || 'Action failed — try again' });
+          rollback?.();
+        }
+        resolve(res || { ok: false });
+      });
     });
+  },
+
+  start: () => get().run('start', (cb) => {
+    const { socket, live } = get();
+    socket?.emit('host:start', { sessionId: live.id }, cb);
   }),
-  next: () => { const { socket, live } = get(); socket?.emit('host:next', { sessionId: live.id }); },
-  // Natural podium → show final results. NOT an end: keeps doneReason=null so
+  next: () => get().run('next', (cb) => {
+    const { socket, live } = get();
+    socket?.emit('host:next', { sessionId: live.id }, cb);
+  }),
+  // Natural podium -> show final results. NOT an end: keeps doneReason=null so
   // players see the champion + FULL RESULTS, never the aborted-game wording.
-  finish: () => { const { socket, live } = get(); socket?.emit('host:finish', { sessionId: live.id }); },
+  finish: () => get().run('finish', (cb) => {
+    const { socket, live } = get();
+    socket?.emit('host:finish', { sessionId: live.id }, cb);
+  }),
   // End must be ack'd: the UI navigates away immediately after, and if we
   // fired-and-forgot then reloaded, the emit could race the socket teardown —
-  // that was the "end section takes 3-4 reloads" symptom. The server acks once
-  // it has broadcast 'done' to every player.
-  end: () => new Promise((resolve) => {
+  // that was the "end section takes 3-4 reloads" symptom.
+  end: () => get().run('end', (cb) => {
     const { socket, live } = get();
-    if (!socket || !live) return resolve({ ok: false, error: 'No live session' });
-    socket.emit('host:end', { sessionId: live.id }, (res) => {
+    socket?.emit('host:end', { sessionId: live.id }, (res) => {
       if (res?.ok) {
         // Session deliberately ended — stop auto-resuming it on refresh,
         // but keep the PIN so the host isn't forced to retype it.
         saveResume({ adminPin: get().adminPin });
       }
-      resolve(res || { ok: false });
+      cb(res);
     });
   }),
-  kick: (playerId) => { const { socket, live } = get(); socket?.emit('host:kick', { sessionId: live.id, playerId }); },
-  setLocked: (locked) => { const { socket, live } = get(); socket?.emit('host:lock', { sessionId: live.id, locked }); },
+  kick: (playerId) => get().run(`kick:${playerId}`, (cb) => {
+    const { socket, live } = get();
+    socket?.emit('host:kick', { sessionId: live.id, playerId }, cb);
+  }),
+  // Optimistic toggle: flips instantly; the server's lobby_locked echo agrees,
+  // and a failed ack rolls it back.
+  setLocked: (locked) => get().run('lock', (cb) => {
+    const { socket, live } = get();
+    socket?.emit('host:lock', { sessionId: live.id, locked }, cb);
+  }, () => set({ locked: !locked })),
   refreshPlayers: () => set((s) => ({ players: s.live?.players || s.players })),
 
   destroy: () => {
@@ -315,7 +369,7 @@ export const useHost = create((set, get) => ({
     if (s) s.disconnect();
     set({
       socket: null, connected: false, restoring: false, reconnecting: false, live: null, phase: 'idle', question: null,
-      countdownDeadline: null, serverOffset: 0, reveal: null, answeredCount: 0, playerCount: 0, scoreboard: null, podium: null,
+      countdownDeadline: null, countdownDuration: 5, serverOffset: 0, pending: null, reveal: null, answeredCount: 0, playerCount: 0, scoreboard: null, podium: null,
       done: null, locked: false, players: [], error: null,
     });
   },

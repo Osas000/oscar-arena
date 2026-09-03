@@ -366,6 +366,7 @@ const scoreboardHoldMs = () => holdMs('SCOREBOARD_HOLD_MS', 8000);
 const podiumHoldMs = () => holdMs('PODIUM_HOLD_MS', 20000);
 
 const countdownMs = () => Number(process.env.COUNTDOWN_MS) || 5000;
+export const countdownDurationMs = () => countdownMs();
 
 export function startGame(sessionId) {
   const session = liveSessions.get(sessionId);
@@ -374,13 +375,24 @@ export function startGame(sessionId) {
   if (session.players.size === 0) {
     throw Object.assign(new Error('No players have joined yet'), { code: 'NO_PLAYERS' });
   }
+  // Idempotent: a double-clicked Start (or a reconnect replaying the emit)
+  // must NOT reset the countdown deadline or re-emit — that was the root of
+  // "the countdown restarts / jumps straight into the question".
+  if (session.status !== 'lobby') return session;
   session.questionIndex = 0;
   session.status = 'countdown';
   session.questionDeadline = null;
   session.countdownDeadline = Date.now() + countdownMs();
 
   publish(session, 'all', 'phase', { phase: 'countdown' });
-  publish(session, 'all', 'countdown', { deadline: session.countdownDeadline, serverTime: Date.now() });
+  // `duration` lets clients hard-clamp their countdown so skew/jitter can
+  // NEVER render a value above the real countdown (the old "it starts at 6"
+  // report: un-clamped ceil on a clock-skewed device).
+  publish(session, 'all', 'countdown', {
+    deadline: session.countdownDeadline,
+    serverTime: Date.now(),
+    duration: countdownMs(),
+  });
 
   // Auto-open Q1 after the countdown. Guard so a manual end/next doesn't race.
   defer(session, countdownMs(), () => {
@@ -393,6 +405,12 @@ export function startGame(sessionId) {
 export function nextQuestion(sessionId) {
   const session = liveSessions.get(sessionId);
   if (!session) throw new Error('Session not found');
+  // A question that is LIVE must never be skipped by a stray/double Next —
+  // players are mid-answer. Only reveal/scoreboard are safe advance points
+  // (the auto-chain calls this from scoreboard; the host fast-forwards from
+  // reveal). This was the "clicking Next skipped a whole question" class of
+  // bug when a double-click landed twice.
+  if (session.status !== 'reveal' && session.status !== 'scoreboard') return session;
   if (session.questionIndex + 1 >= session.quiz.questions.length) {
     finishGame(session);
     return session;
@@ -666,6 +684,7 @@ export function playerStateSnapshot(session, playerId) {
     questionIndex: session.questionIndex,
     totalQuestions: session.quiz.questions.length,
     countdownDeadline: session.status === 'countdown' ? session.countdownDeadline : undefined,
+    countdownDuration: session.status === 'countdown' ? countdownMs() : undefined,
     myAnswer,
     total: state?.total || 0,
     correctCount: state?.correct || 0,

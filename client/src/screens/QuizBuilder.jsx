@@ -44,8 +44,15 @@ export default function QuizBuilder({ quizId, onBack, onHost }) {
     ...q, options: q.options.map((o, j) => ({ ...o, correct: j === oi })),
   })));
   const removeQuestion = (qi) => setQuestions((qs) => qs.filter((_, i) => i !== qi));
-  const addOption = (qi) => update(qi, { options: [...questions[qi].options, { id: crypto.randomUUID(), text: '', correct: false }] });
-  const removeOption = (qi, oi) => update(qi, { options: questions[qi].options.filter((_, j) => j !== oi) });
+  const addOption = (qi) => setQuestions((qs) => qs.map((q, i) => (i !== qi ? q : ({
+    ...q, options: [...q.options, { id: crypto.randomUUID(), text: '', correct: false }],
+  }))));
+  // Functional updates: the OLD version read `questions[qi]` from the render
+  // closure, which is stale under rapid clicks — adding/removing options could
+  // act on the previous snapshot and drop keystrokes ("builder feels stiff").
+  const removeOption = (qi, oi) => setQuestions((qs) => qs.map((q, i) => (i !== qi ? q : ({
+    ...q, options: q.options.filter((_, j) => j !== oi),
+  }))));
 
   const valid = () =>
     title.trim() && questions.length > 0 && questions.every((q) =>
@@ -127,7 +134,9 @@ export default function QuizBuilder({ quizId, onBack, onHost }) {
                 <input
                   type="number" min={3} max={120}
                   value={q.time_limit}
-                  onChange={(e) => update(qi, { time_limit: Number(e.target.value) })}
+                  // Keep the raw value while typing: coercing '' to 0 mid-keystroke
+                  // flashes a bogus 0 and feels broken.
+                  onChange={(e) => update(qi, { time_limit: e.target.value === '' ? '' : Number(e.target.value) })}
                   className="ml-2 w-16 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-center text-white outline-none focus:border-arena-gold"
                 />s
               </label>
@@ -135,7 +144,7 @@ export default function QuizBuilder({ quizId, onBack, onHost }) {
                 <input
                   type="number" min={100} step={100} max={10000}
                   value={q.points}
-                  onChange={(e) => update(qi, { points: Number(e.target.value) })}
+                  onChange={(e) => update(qi, { points: e.target.value === '' ? '' : Number(e.target.value) })}
                   className="ml-2 w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-center text-white outline-none focus:border-arena-gold"
                 />
               </label>

@@ -201,15 +201,19 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('host:kick', ({ sessionId, playerId }) => {
+  socket.on('host:kick', ({ sessionId, playerId }, ack) => {
     const s = engine.getLive(sessionId);
     const player = s && s.players.get(playerId);
     engine.kickPlayer(sessionId, playerId);
     if (player) socket.to(`player:${playerId}:${sessionId}`).emit('kicked');
+    // Ack'd so the host UI always gets an answer — a fire-and-forget kick can
+    // vanish into a reconnecting socket and leave the host clicking twice.
+    ack && ack({ ok: true });
   });
 
-  socket.on('host:lock', ({ sessionId, locked }) => {
+  socket.on('host:lock', ({ sessionId, locked }, ack) => {
     engine.setLobbyLocked(sessionId, Boolean(locked));
+    ack && ack({ ok: true });
   });
 
   socket.on('host:end', ({ sessionId }, ack) => {
@@ -258,7 +262,14 @@ function liveStateFull(s) {
   const q = s.questionIndex >= 0 ? s.quiz.questions[s.questionIndex] : null;
   out.totalQuestions = s.quiz.questions.length;
   out.quizTitle = s.quiz.title;
-  if (s.status === 'countdown') out.countdownDeadline = s.countdownDeadline;
+  // Fresh server clock so a resumed/refreshed host recalibrates its offset
+  // (adoptHostState without this rendered the countdown on the RAW device
+  // clock — a laptop behind the server showed "6,5,4…" instead of "5,4,3…").
+  out.serverTime = Date.now();
+  if (s.status === 'countdown') {
+    out.countdownDeadline = s.countdownDeadline;
+    out.countdownDuration = engine.countdownDurationMs();
+  }
   if (s.status === 'question' && s.liveRound && q) {
     out.question = {
       index: s.questionIndex, total: s.quiz.questions.length,
@@ -308,3 +319,16 @@ function shutdown() {
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+
+// Test hook: let an in-process suite (node --test) shut the server down so
+// the runner's event loop can drain — an open listener (or lingering socket.io
+// connections after a failed assert) otherwise hangs the suite forever.
+export function closeServerForTests() {
+  closeDb();
+  try { io.close(); } catch { /* already closed */ }
+  httpServer.close();
+  // Force-drain any connections that a failed test left open.
+  if (typeof httpServer.closeAllConnections === 'function') {
+    setTimeout(() => httpServer.closeAllConnections(), 30);
+  }
+}

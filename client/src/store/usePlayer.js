@@ -46,6 +46,7 @@ export const usePlayer = create((set, get) => ({
   // --- game state ---
   quizTitle: '',
   countdownDeadline: null,
+  countdownDuration: 5, // seconds, from the server countdown payload (clamp source)
   // Server-offset in ms: serverTime - clientTime, captured when the server's
   // countdown/question payloads arrive. Every client-side countdown subtracts
   // it, so a phone whose clock is seconds behind the server shows the SAME
@@ -108,6 +109,7 @@ export const usePlayer = create((set, get) => ({
     });
     socket.on('countdown', (c) => set({
       countdownDeadline: c.deadline,
+      countdownDuration: c.duration || 5,
       serverOffset: c.serverTime - Date.now(),
       phase: 'countdown',
     }));
@@ -206,7 +208,7 @@ export const usePlayer = create((set, get) => ({
     set({
       socket: null, connected: false, error: null, reconnecting: false, phase: 'left', pin: '', nickname: '',
       playerId: null, resumeToken: null, question: null, myChoice: null, myResult: null,
-      total: 0, correctCount: 0, playerCount: 0, answeredCount: 0, scoreboardTop: [], countdownDeadline: null,
+      total: 0, correctCount: 0, playerCount: 0, answeredCount: 0, scoreboardTop: [], countdownDeadline: null, countdownDuration: 5,
       podium: null, done: null, kicked: false, sessionId: null,
     });
   },
@@ -241,6 +243,7 @@ function applySnapshot(st) {
     question: st.question,
     serverOffset: st.serverTime ? st.serverTime - Date.now() : 0,
     countdownDeadline: st.countdownDeadline ?? null,
+    countdownDuration: st.countdownDuration || 5,
     myResult: set.myResult ?? (st.myAnswer
       ? { ...st.myAnswer, total: st.total, questionIndex: st.question?.index ?? -1 }
       : null),
