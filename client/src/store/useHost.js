@@ -74,6 +74,11 @@ export const useHost = create((set, get) => ({
       // re-typed PIN every time the network blips.
       saveResume({ ...(loadResume() || {}), adminPin: pin });
       set({ authed: true, quizzes, adminPin: pin, authLoading: false });
+      // HOST-CLICK LATENCY FIX: open the host socket NOW so a later
+      // "Host ▶" click only pays createSession + host:join (~0.7s) instead
+      // of adding a fresh WebSocket handshake (~1.3s+) on top. The idle
+      // socket costs nothing (one heartbeat every 20s).
+      get().ensureSocket();
       // A refresh cleared our live context but the session may still be
       // running — silently re-attach so the game is not orphaned.
       get().tryAutoResume?.();
@@ -320,6 +325,8 @@ export const useHost = create((set, get) => ({
         return;
       }
     }
+    // Pre-warm the host socket so the next Host click is instant.
+    get().ensureSocket();
     if (stored.sessionId) await get().resumeLive(stored.sessionId);
     set({ restoring: false });
   },
