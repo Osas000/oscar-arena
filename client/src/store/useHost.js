@@ -59,6 +59,9 @@ export const useHost = create((set, get) => ({
   locked: false,
   players: [],
   error: null,
+  // The quiz currently being hosted (drives "Hosting…" on the dashboard row).
+  hostingQuizId: null,
+  hostError: null,
 
   // ----------------------------- auth -----------------------------
   login: async (pin) => {
@@ -215,19 +218,33 @@ export const useHost = create((set, get) => ({
   },
 
   // Begin hosting a chosen quiz: create session + attach host socket.
+  // Single-flight + feedback: `hostingQuizId` drives instant "Hosting…" UI,
+  // and repeated clicks while pending are ignored (they used to silently
+  // create MULTIPLE sessions / double-fire). The ROUTER reacts to store state
+  // (live+phase), so a late ack can never yank the user off another screen
+  // ("I clicked Host, clicked Edit, and the game hosted behind my back").
   hostGame: async (quizId) => {
-    const session = await api.createSession(quizId);
-    const socket = get().ensureSocket();
-    return new Promise((resolve, reject) => {
-      socket.emit('host:join', { sessionId: session.id, adminPin: get().adminPin }, (res) => {
-        if (!res.ok) return reject(new Error(res.error));
-        // Remember the live session across refreshes (keyed with the PIN we
-        // already hold) so a reload re-attaches instead of killing the game.
-        saveResume({ sessionId: session.id, adminPin: get().adminPin });
-        get().adoptHostState(res);
-        resolve(res);
+    if (get().hostingQuizId) return null; // one host operation at a time
+    set({ hostingQuizId: quizId, hostError: null });
+    try {
+      const session = await api.createSession(quizId);
+      const socket = get().ensureSocket();
+      const res = await new Promise((resolve, reject) => {
+        socket.emit('host:join', { sessionId: session.id, adminPin: get().adminPin }, (r) => {
+          if (!r?.ok) return reject(new Error(r?.error || 'Could not attach to session'));
+          resolve(r);
+        });
       });
-    });
+      // Remember the live session across refreshes (keyed with the PIN we
+      // already hold) so a reload re-attaches instead of killing the game.
+      saveResume({ sessionId: session.id, adminPin: get().adminPin });
+      get().adoptHostState(res);
+      set({ hostingQuizId: null });
+      return res;
+    } catch (e) {
+      set({ hostingQuizId: null, hostError: e.message || 'Could not host this quiz' });
+      throw e;
+    }
   },
 
   // Adopt full live state (fresh lobby or reconnect restore).
@@ -385,7 +402,7 @@ export const useHost = create((set, get) => ({
     set({
       socket: null, connected: false, restoring: false, reconnecting: false, live: null, phase: 'idle', question: null,
       countdownDeadline: null, countdownDuration: 5, serverOffset: 0, pending: null, reveal: null, answeredCount: 0, playerCount: 0, scoreboard: null, podium: null,
-      done: null, locked: false, players: [], error: null,
+      done: null, locked: false, players: [], error: null, hostingQuizId: null, hostError: null,
     });
   },
 }));

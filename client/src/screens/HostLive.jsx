@@ -46,7 +46,10 @@ export default function HostLive({ onExit }) {
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           {live && <span className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs font-bold text-white/80 sm:text-sm">PIN {live.pin}</span>}
-          <button onClick={onExit} className="rounded-lg bg-white/10 px-2.5 py-1.5 text-xs text-white/70 hover:bg-arena-red/40 hover:text-white sm:px-3 sm:text-sm">End session</button>
+          <button onClick={onExit} disabled={pending === 'end'}
+            className={`rounded-lg px-2.5 py-1.5 text-xs sm:px-3 sm:text-sm ${pending === 'end' ? 'bg-white/10 text-white/50' : 'bg-white/10 text-white/70 hover:bg-arena-red/40 hover:text-white'}`}>
+            {pending === 'end' ? <><span className="arena-spinner" />Ending…</> : 'End session'}
+          </button>
         </div>
       </header>
 

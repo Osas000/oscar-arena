@@ -55,12 +55,27 @@ const joinLat = [];
 const peakMem = { heap: 0, rss: 0 };
 let gameDone = false;
 
-const api = async (method, path, body) => {
-  const r = await fetch(BASE + path, {
-    method, headers: { 'Content-Type': 'application/json', 'x-admin-pin': PIN },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return r.json();
+const api = async (method, path, body, attempt = 0) => {
+  try {
+    const r = await fetch(BASE + path, {
+      method, headers: { 'Content-Type': 'application/json', 'x-admin-pin': PIN },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok && !data.ok) {
+      const err = new Error(data.error || r.statusText);
+      err.status = r.status;
+      throw err;
+    }
+    return data;
+  } catch (e) {
+    // Transient WAN flakiness (real-world links): retry transport errors, not HTTP rejections.
+    if (attempt < 3 && !e.status) {
+      await sleep(1200 * (attempt + 1));
+      return api(method, path, body, attempt + 1);
+    }
+    throw e;
+  }
 };
 
 // Sample server memory concurrently with the load.

@@ -5,9 +5,10 @@ import { useHost } from '../store/useHost.js';
 import Logo from '../components/Logo.jsx';
 
 export default function HostDashboard({ onOpenBuilder, onHost }) {
-  const { quizzes, loadQuizzes, createQuiz, deleteQuiz, logout, quizzesLoading, changePin, pinSaved } = useHost();
+  const { quizzes, loadQuizzes, createQuiz, deleteQuiz, logout, quizzesLoading, changePin, pinSaved, hostingQuizId, hostError } = useHost();
   const [newTitle, setNewTitle] = useState('');
   const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
   const [showPinModal, setShowPinModal] = useState(false);
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
@@ -43,6 +44,11 @@ export default function HostDashboard({ onOpenBuilder, onHost }) {
     } finally { setPinBusy(false); }
   };
 
+  const remove = async (id) => {
+    setDeletingId(id);
+    try { await deleteQuiz(id); } finally { setDeletingId(null); }
+  };
+
   return (
     <div className="min-h-screen px-4 py-6">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-x-3 gap-y-3">
@@ -59,6 +65,12 @@ export default function HostDashboard({ onOpenBuilder, onHost }) {
         </div>
       </header>
 
+      {hostError && (
+        <div className="mb-4 rounded-xl bg-arena-red/15 px-4 py-3 text-sm font-semibold text-arena-red ring-1 ring-arena-red/40">
+          ⚠ Could not host: {hostError}
+        </div>
+      )}
+
       {pinSaved && (
         <div className="mb-4 rounded-xl bg-arena-green/15 px-4 py-3 text-sm font-semibold text-arena-green ring-1 ring-arena-green/40">
           ✔ Admin PIN changed successfully.
@@ -73,8 +85,8 @@ export default function HostDashboard({ onOpenBuilder, onHost }) {
           placeholder="New quiz title…"
           className="min-w-0 flex-1 rounded-xl border-2 border-white/15 bg-white/5 px-4 py-2.5 text-white outline-none focus:border-arena-gold"
         />
-        <motion.button whileTap={{ scale: 0.96 }} disabled={creating || !newTitle.trim()} className="rounded-xl bg-arena-gold px-5 py-2.5 font-bold text-arena-navy hover:brightness-110 disabled:opacity-50">
-          + Create
+        <motion.button whileTap={{ scale: creating ? 1 : 0.96 }} disabled={creating || !newTitle.trim()} className="rounded-xl bg-arena-gold px-5 py-2.5 font-bold text-arena-navy hover:brightness-110 disabled:opacity-50">
+          {creating ? <><span className="arena-spinner" />Creating…</> : '+ Create'}
         </motion.button>
       </form>
 
@@ -94,14 +106,18 @@ export default function HostDashboard({ onOpenBuilder, onHost }) {
               <div className="truncate font-bold text-white">{q.title}</div>
               <div className="text-xs text-white/50">{q.questionCount} question{q.questionCount === 1 ? '' : 's'}</div>
             </div>
-            <button onClick={() => onOpenBuilder(q.id)} className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white/80 hover:bg-white/20">
+            <button onClick={() => onOpenBuilder(q.id)} disabled={hostingQuizId !== null}
+              className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white/80 hover:bg-white/20 disabled:opacity-40">
               Edit
             </button>
-            <button onClick={() => onHost(q.id)} className="rounded-lg bg-arena-gold px-3 py-1.5 text-sm font-bold text-arena-navy hover:brightness-110">
-              Host ▶
-            </button>
-            <button onClick={() => deleteQuiz(q.id)} className="rounded-lg bg-arena-red/20 px-2.5 py-1.5 text-sm text-arena-red hover:bg-arena-red/40" title="Delete quiz">
-              ✕
+            <motion.button whileTap={{ scale: hostingQuizId === q.id ? 1 : 0.96 }} disabled={hostingQuizId !== null}
+              onClick={() => onHost(q.id)}
+              className={`rounded-lg px-3 py-1.5 text-sm font-bold text-arena-navy ${hostingQuizId === q.id ? 'bg-arena-gold' : 'bg-arena-gold hover:brightness-110'} disabled:opacity-60`}>
+              {hostingQuizId === q.id ? <><span className="arena-spinner" />Hosting…</> : 'Host ▶'}
+            </motion.button>
+            <button onClick={() => remove(q.id)} disabled={deletingId !== null || hostingQuizId !== null}
+              className="rounded-lg bg-arena-red/20 px-2.5 py-1.5 text-sm text-arena-red hover:bg-arena-red/40 disabled:opacity-40" title="Delete quiz">
+              {deletingId === q.id ? <span className="arena-spinner" /> : '✕'}
             </button>
           </motion.div>
         ))}

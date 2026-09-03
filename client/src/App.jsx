@@ -102,7 +102,11 @@ export default function App() {
       return (
         <HostDashboard
           onOpenBuilder={(id) => go(`/host/builder/${id}`)}
-          onHost={(id) => { host.hostGame(id).then(() => go('/host/live')).catch((e) => console.error(e)); }}
+          // NO navigation from the closure: the router switches to HostLive
+          // the moment the store flips live+phase. This is what kills the
+          // ghost-host bug (clicking Host, editing, and the game hosting
+          // itself behind your back when the slow ack finally landed).
+          onHost={(id) => { host.hostGame(id).catch(() => {}); }}
         />
       );
     }
