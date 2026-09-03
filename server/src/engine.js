@@ -167,6 +167,9 @@ export function createSession({ quizId, hostId, adminPin }) {
     hostSocketId: null,          // current host socket
     sockets: new Map(),          // socketId -> { role: 'host'|'player', playerId? }
     players: new Map(),          // playerId -> player record
+    // O(1) nickname collision check (capture of the O(n) scan-with-array-alloc
+    // that ground the join path on Render's 0.1 CPU at crowd scale).
+    nickSet: new Set(),          // lowercase nicknames of non-kicked players
     playerStates: new Map(),     // playerId -> { total, correct } cumulative
     liveRound: null,             // active question round
     timers: new Set(),           // all pending setTimeout ids for cleanup
@@ -238,6 +241,20 @@ export function cancelHostLostEnd(sessionId) {
   if (t) { clearTimeout(t); hostLostTimers.delete(sessionId); }
 }
 
+// Cached prepared statements for the hot paths. Calling db.prepare() per
+// join/answer = SQL parse + allocation on EVERY hit — a real drain on a
+// CPU-starved host (Render free 0.1 core) at crowd scale. Prepared ONCE
+// against the module's live connection.
+const stmtPlayerInsert = db.prepare(
+  'INSERT INTO players (id, session_id, nickname, resume_token) VALUES (?, ?, ?, ?)'
+);
+const stmtPlayerKick = db.prepare('UPDATE players SET kicked = 1 WHERE id = ?');
+const stmtAnswerInsert = db.prepare(
+  `INSERT INTO answers (id, session_id, player_id, question_id, question_index, choice, correct, points_awarded, responded_ms, streak)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+);
+const stmtSessionEnd = db.prepare('UPDATE sessions SET status = ?, ended_at = ? WHERE id = ?');
+
 // ------------------------------ Player join --------------------------------
 /**
  * Join or resume. If `resumeToken` matches an existing player in the session,
@@ -276,16 +293,16 @@ export function joinPlayer({ sessionId, nickname, resumeToken, socketId }) {
       throw Object.assign(new Error('Lobby locked'), { code: 'LOCKED' });
     }
     if (!cleanName) throw Object.assign(new Error('Nickname required'), { code: 'NO_NAME' });
-    const taken = [...session.players.values()].some(
-      (p) => p.nickname.toLowerCase() === cleanName.toLowerCase() && !p.kicked
-    );
-    if (taken) throw Object.assign(new Error('Nickname already taken'), { code: 'NAME_TAKEN' });
+    // O(1) collision check via nickSet (was: full players-Map scan with a
+    // fresh array allocation per join — the free-tier join-path killer).
+    const key = cleanName.toLowerCase();
+    if (session.nickSet.has(key)) {
+      throw Object.assign(new Error('Nickname already taken'), { code: 'NAME_TAKEN' });
+    }
 
     const playerId = uuid();
     const token = uuid();
-    db.prepare(
-      'INSERT INTO players (id, session_id, nickname, resume_token) VALUES (?, ?, ?, ?)'
-    ).run(playerId, sessionId, cleanName, token);
+    stmtPlayerInsert.run(playerId, sessionId, cleanName, token);
     player = {
       id: playerId,
       nickname: cleanName,
@@ -293,6 +310,7 @@ export function joinPlayer({ sessionId, nickname, resumeToken, socketId }) {
       kicked: false,
     };
     session.players.set(playerId, player);
+    session.nickSet.add(key);
     session.playerStates.set(playerId, { total: 0, correct: 0 });
     publish(session, 'host', 'player_joined', { player: publicPlayer(player) });
   }
@@ -339,7 +357,8 @@ export function kickPlayer(sessionId, playerId) {
   const player = session.players.get(playerId);
   if (!player) return;
   player.kicked = true;
-  db.prepare('UPDATE players SET kicked = 1 WHERE id = ?').run(playerId);
+  session.nickSet.delete(player.nickname.toLowerCase());
+  stmtPlayerKick.run(playerId);
   publish(session, 'host', 'player_kicked', { playerId });
   // The player's own socket(s) get kicked via a targeted emit by index.js
   return player;
@@ -529,10 +548,7 @@ export function flushAnswers() {
   flushRunning = true;
   try {
     const rows = answerQueue.splice(0, answerQueue.length);
-    const insert = db.prepare(
-      `INSERT INTO answers (id, session_id, player_id, question_id, question_index, choice, correct, points_awarded, responded_ms, streak)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
+    const insert = stmtAnswerInsert;
     // ONE commit for the whole batch — thousands of individual commits is the
     // exact stall that capped a single process around 2500-3000 players.
     db.transaction((all) => { for (const r of all) insert.run(r); })(rows);
@@ -620,9 +636,7 @@ export function finishGame(session) {
   const top3 = ranking(session).slice(0, 3);
   publish(session, 'all', 'podium', { top3 });
   publish(session, 'all', 'phase', { phase: 'podium' });
-  db.prepare('UPDATE sessions SET status = ?, ended_at = ? WHERE id = ?').run(
-    'done', Math.floor(Date.now() / 1000), session.id
-  );
+  stmtSessionEnd.run('done', Math.floor(Date.now() / 1000), session.id);
 
   clearSessionTimers(session);
   defer(session, podiumHoldMs(), () => {
@@ -712,9 +726,7 @@ export function endSession(sessionId) {
   clearSessionTimers(session);
   session.status = 'done';
   session.doneReason = 'host';
-  db.prepare('UPDATE sessions SET status = ?, ended_at = ? WHERE id = ?').run(
-    'done', Math.floor(Date.now() / 1000), session.id
-  );
+  stmtSessionEnd.run('done', Math.floor(Date.now() / 1000), session.id);
   // Payload FIRST, then the phase — clients render the done block atomically.
   // Player-safe payloads (rank, not the full table) so 2000 phones don't each
   // download the whole ranking at the worst moment.
