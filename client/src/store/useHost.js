@@ -174,7 +174,22 @@ export const useHost = create((set, get) => ({
       // answering ("is that tick showing the answer?" report).
       reveal: null, scoreboard: null, podium: null, done: null,
     }));
-    socket.on('answer_received', (d) => set({ answeredCount: d.answeredCount, playerCount: d.playerCount, players: playersFrom(d) }));
+    socket.on('answer_received', (() => {
+      // HOST-SCREEN SCALE FIX: with N players the server emits ONE
+      // answer_received per answer — N re-renders per question would jank a
+      // 2000-player event. Batch to ~8 commits/sec (Kahoot-style): the count
+      // still lands, the projector stays smooth.
+      let buf = null;
+      let timer = null;
+      return (d) => {
+        buf = d;
+        if (timer) return;
+        timer = setTimeout(() => {
+          timer = null;
+          if (buf) { set({ answeredCount: buf.answeredCount, playerCount: buf.playerCount, players: playersFrom(buf) }); buf = null; }
+        }, 120);
+      };
+    })());
     socket.on('player_joined', (d) => {
       set((s) => ({ playerCount: s.playerCount + 1, players: [...s.players.filter((p) => p.id !== d.player.id), d.player] }));
     });

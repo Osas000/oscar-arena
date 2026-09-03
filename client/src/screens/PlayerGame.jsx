@@ -202,27 +202,25 @@ export default function PlayerGame({ onLeave }) {
                 champion crown, no results listing. The game was abandoned, so
                 the player gets a clean 'try again' — never 'You are the
                 CHAMPION' (that only belongs to a naturally finished game). */}
-            {!s.kicked && s.done?.reason !== 'host' && s.done?.results && (
+            {!s.kicked && s.done?.reason !== 'host' && s.done?.rank != null && (
               <div className="mt-4">
                 <p className="text-white/70">Final score: <span className="font-mono text-2xl font-black text-arena-gold">{total.toLocaleString()}</span></p>
-                {/* Your rank out of everyone — computed from the full results list */}
+                {/* Rank comes SERVER-COMPUTED (scale fix: the done payload to
+                    players carries {rank, totalPlayers} — never the full
+                    results table, which at 2000 players is a ~170KB × 2000
+                    fan-out that stalled phone/network right at the finale). */}
                 {(() => {
-                  const idx = s.done.results.findIndex((r) => r.playerId === s.playerId);
-                  if (idx >= 0) {
-                    const rank = idx + 1;
-                    const totalPlayers = s.done.results.length;
-                    const msg = rank === 1 ? '🥇 You are the CHAMPION!'
-                      : rank === 2 ? '🥈 You came 2nd!'
-                      : rank === 3 ? '🥉 You came 3rd!'
-                      : `You came #${rank} of ${totalPlayers}`;
-                    return (
-                      <motion.p initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', stiffness: 200, delay: 0.2 }}
-                        className="mt-2 text-2xl font-black text-arena-gold drop-shadow">
-                        {msg}
-                      </motion.p>
-                    );
-                  }
-                  return null;
+                  const { rank, totalPlayers } = s.done;
+                  const msg = rank === 1 ? '🥇 You are the CHAMPION!'
+                    : rank === 2 ? '🥈 You came 2nd!'
+                    : rank === 3 ? '🥉 You came 3rd!'
+                    : `You came #${rank} of ${totalPlayers}`;
+                  return (
+                    <motion.p initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', stiffness: 200, delay: 0.2 }}
+                      className="mt-2 text-2xl font-black text-arena-gold drop-shadow">
+                      {msg}
+                    </motion.p>
+                  );
                 })()}
               </div>
             )}

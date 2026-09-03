@@ -34,7 +34,7 @@ const flag = (n, d) => {
   const i = args.indexOf('--' + n);
   return i >= 0 && args[i + 1] && !String(args[i + 1]).startsWith('--') ? args[i + 1] : d;
 };
-const PLAYERS = Math.min(1000, parseInt(flag('players', '400'), 10) || 400);
+const PLAYERS = Math.min(5000, parseInt(flag('players', '400'), 10) || 400);
 const BATCH = Math.max(5, parseInt(flag('batch', '50'), 10) || 50);
 // STRESS_FAST=1 pairs with compressed phase holds on the server (see engine.js
 // ANSWER_GRACE_MS / REVEAL_HOLD_MS / SCOREBOARD_HOLD_MS) so the harness may

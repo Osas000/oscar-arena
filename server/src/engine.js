@@ -492,13 +492,15 @@ export function submitAnswer(sessionId, playerId, choice) {
     choice, correct, points, streak, respondedMs,
   });
 
-  db.prepare(
-    `INSERT INTO answers (id, session_id, player_id, question_id, question_index, choice, correct, points_awarded, responded_ms, streak)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    uuid(), session.id, playerId, q.id, session.questionIndex,
-    choice, correct ? 1 : 0, points, respondedMs, streak
-  );
+  // ARCHIVE INSERT IS WRITE-BEHIND (scale fix): the answers table is archival —
+  // every live computation (scores, streaks, distribution, ranking) uses the
+  // in-memory round state above. A synchronous INSERT per answer makes the
+  // single event loop stall through an answer burst (measured ceiling end of
+  // the 3000-player marathon). Queue and flush in one SQLite TRANSACTION
+  // shortly after the burst; closeQuestion flushes synchronously once, which
+  // keeps the archive complete per question.
+  queueAnswer([uuid(), session.id, playerId, q.id, session.questionIndex,
+    choice, correct ? 1 : 0, points, respondedMs, streak]);
 
   publish(session, 'host', 'answer_received', {
     answeredCount: session.liveRound.answered.size,
@@ -507,9 +509,47 @@ export function submitAnswer(sessionId, playerId, choice) {
   return { ok: true, correct, points, streak };
 }
 
+// --------------------- write-behind answer archive ------------------------
+const answerQueue = [];
+let answerFlushTimer = null;
+
+function queueAnswer(row) {
+  answerQueue.push(row);
+  if (answerFlushTimer) return;
+  // 50ms window: answers from one burst collect into a single transaction.
+  answerFlushTimer = setTimeout(() => {
+    answerFlushTimer = null;
+    flushAnswers();
+  }, 50);
+}
+
+let flushRunning = false;
+export function flushAnswers() {
+  if (flushRunning || answerQueue.length === 0) return;
+  flushRunning = true;
+  try {
+    const rows = answerQueue.splice(0, answerQueue.length);
+    const insert = db.prepare(
+      `INSERT INTO answers (id, session_id, player_id, question_id, question_index, choice, correct, points_awarded, responded_ms, streak)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    // ONE commit for the whole batch — thousands of individual commits is the
+    // exact stall that capped a single process around 2500-3000 players.
+    db.transaction((all) => { for (const r of all) insert.run(r); })(rows);
+    // Don't reschedule inside the transaction; the next queueAnswer does.
+  } finally {
+    flushRunning = false;
+  }
+}
+
 function closeQuestion(session) {
   const round = session.liveRound;
   const q = session.quiz.questions[session.questionIndex];
+
+  // Durability: the round is over — land every queued answer in ONE commit
+  // before the reveal leaves this question behind (scores are in-memory, but
+  // the archive must stay question-complete for results/export).
+  flushAnswers();
 
   // Per-player verdict + cumulative totals (players get their own only).
   const distribution = [0, 0, 0, 0, 0, 0];
@@ -611,8 +651,45 @@ export function finishPodium(sessionId) {
 function revealResults(session) {
   const cur = liveSessions.get(session.id);
   if (!cur || cur.status !== 'podium') return;
+  finishDone(cur);
+}
+
+// Player-safe 'done' payload: rank + total only. The FULL results array goes
+// ONLY to the host room. At 2000+ players a full ranking (~170KB) pushed to
+// every phone × 2000 sockets = a ~350MB fan-out right after the podium — it
+// floods the venue network and phones stall on 'done' (measured: 154/2100
+// received it pre-fix). Players only ever render their own rank.
+function doneForPlayer(session, playerId) {
+  const results = ranking(session);
+  const idx = results.findIndex((r) => r.playerId === playerId);
+  return {
+    rank: idx >= 0 ? idx + 1 : null,
+    totalPlayers: results.length,
+    ended: session.doneReason === 'host',
+    reason: session.doneReason || undefined,
+  };
+}
+
+/** Terminal broadcast: host gets the full ranking, each player just their rank. */
+function finishDone(cur) {
   cur.status = 'done';
-  publish(cur, 'all', 'done', { results: ranking(cur) });
+  // Land any queued archive rows (e.g. host ended mid-burst) before teardown.
+  flushAnswers();
+  const ended = cur.doneReason === 'host';
+  const reason = cur.doneReason || undefined;
+  // ONE ranking (not one per player — ranking() is O(n log n), and a
+  // per-player loop was the hidden stall: the host's done fired while the
+  // server was still grinding through 2100×sort for the player payloads).
+  const results = ranking(cur);
+  const rankByPlayer = new Map(results.map((r, i) => [r.playerId, i + 1]));
+  const payloads = new Map();
+  for (const pid of cur.players.keys()) {
+    payloads.set(pid, { rank: rankByPlayer.get(pid) ?? null, totalPlayers: results.length, ended, reason });
+  }
+  publish(cur, 'host', 'done', { results, ended, reason });
+  for (const [pid, payload] of payloads) {
+    publish(cur, 'player:' + pid, 'done', payload);
+  }
   publish(cur, 'all', 'phase', { phase: 'done' });
 }
 
@@ -638,11 +715,10 @@ export function endSession(sessionId) {
   db.prepare('UPDATE sessions SET status = ?, ended_at = ? WHERE id = ?').run(
     'done', Math.floor(Date.now() / 1000), session.id
   );
-  // Publish the payload FIRST, then the phase — clients render the done
-  // block atomically; a bare phase:'done' (no results yet) would leave
-  // AnimatePresence stuck on the podium exit.
-  publish(session, 'all', 'done', { results: ranking(session), ended: true, reason: 'host' });
-  publish(session, 'all', 'phase', { phase: 'done' });
+  // Payload FIRST, then the phase — clients render the done block atomically.
+  // Player-safe payloads (rank, not the full table) so 2000 phones don't each
+  // download the whole ranking at the worst moment.
+  finishDone(session);
 }
 
 /** Snapshot of everything a reconnecting player needs to redraw the UI. */
@@ -701,9 +777,8 @@ export function playerStateSnapshot(session, playerId) {
     // player lands on the SAME terminal screen (host-ended vs. natural finish):
     // with `reason: 'host'` the client shows a professional "session ended"
     // screen instead of the champion rank (the game was never concluded).
-    done: session.status === 'done'
-      ? { results: ranking(session), ended: session.doneReason === 'host', reason: session.doneReason || undefined }
-      : undefined,
+    // Player-safe: rank + total, never the full ranking table (scale fix).
+    done: session.status === 'done' ? doneForPlayer(session, playerId) : undefined,
   };
 }
 

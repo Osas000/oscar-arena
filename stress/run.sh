@@ -25,7 +25,7 @@ done
 
 echo "▶ running stress harness"
 cd "$ROOT"
-OSCAR_URL="http://localhost:${PORT}" ADMIN_PIN=000000 node stress/load.js --players "$PLAYERS"
+OSCAR_URL="http://localhost:${PORT}" ADMIN_PIN=000000 node stress/load.js --players "$PLAYERS" "$@"
 RC=$?
 echo "▶ stress exit code = $RC"
 echo "--- server tail ---"; tail -5 "$ROOT/server/data/stress-server.log"
