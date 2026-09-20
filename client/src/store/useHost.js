@@ -335,11 +335,13 @@ export const useHost = create((set, get) => ({
   //  - the UI always gets an answer (ok or error) — no more "clicked, nothing
   //    happened, click again" from emits lost in a reconnecting socket;
   //  - while `pending` is set, repeated clicks are ignored — no double-fire.
-  // An 8s ack-timeout safety net clears a stuck pending so the host is never
-  // locked out (e.g. the socket died mid-flight).
+  // A 5s ack-timeout safety net clears a stuck pending so the host is never
+  // locked out. We do NOT gate on socket.connected — Socket.IO auto-queues
+  // emits during a brief reconnect, so blocking only makes buttons feel dead
+  // for no reason (the "click 3 times before it picks up" bug).
   run: (action, send, rollback) => {
     const { socket, pending } = get();
-    if (!socket || !socket.connected) {
+    if (!socket) {
       set({ error: 'Disconnected — reconnecting…' });
       return Promise.resolve({ ok: false, error: 'Disconnected' });
     }
@@ -349,7 +351,7 @@ export const useHost = create((set, get) => ({
       const timer = setTimeout(() => {
         if (get().pending === action) set({ pending: null });
         resolve({ ok: false, error: 'Timed out' });
-      }, 8000);
+      }, 5000);
       send((res) => {
         clearTimeout(timer);
         if (res?.ok) {

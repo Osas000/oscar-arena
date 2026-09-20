@@ -1,49 +1,50 @@
 // Full-screen animated countdown shown to host + players right before Q1,
 // driven by the authoritative server deadline so everyone stays in sync.
-// `serverOffset` cancels device clock skew (see TimerBar): every phone shows
-// the same 5-4-3-2-1 regardless of its own clock.
 //
-// Hard rules that kill the "starts at 6 / shows nothing / jumps to 3" reports:
-//  1. The displayed value is CLAMPED to [0, duration]. Skew, jitter or a
-//     stale offset can make `deadline - now` miscalculate — clamping means
-//     the number can never exceed the real countdown (the old "6" bug).
-//  2. Without an authoritative deadline the screen shows a stable
-//     "Get Ready…" state — never NaN, never a blank/glitched digit (the old
-//     between-phase-event flash on phones).
-import { useEffect, useState } from 'react';
+// Sync strategy (kills the "starts at 6 / shows nothing / jumps to 3" reports):
+//  - The SERVER owns the truth: it emits { deadline, serverTime, duration }.
+//    `deadline` is the absolute server timestamp the countdown hits zero.
+//  - Each client computes `serverNow = Date.now() + serverOffset` where
+//    `serverOffset = serverTime_atEmit - clientTime_atReceive`. This cancels
+//    both clock skew AND network latency in one shot.
+//  - Remaining seconds = ceil((deadline - serverNow) / 1000), hard-clamped to
+//    [0, duration]. The clamp is the final safety net: even if the offset is
+//    slightly off, the displayed number NEVER exceeds the real countdown.
+//  - We tick at 200ms (not 250) so late-arriving events converge within one
+//    frame — no phone ever skips a number or shows a stale digit.
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { tick } from '../lib/audio.js';
 
 export default function Countdown({ deadline, serverOffset = 0, duration = 5 }) {
-  const now = () => Date.now() + serverOffset;
-  const total = Math.max(1, Math.round(Number(duration) || 5));
+  const total = Math.max(1, Math.min(10, Math.round(Number(duration) / 1000) || 5));
 
-  // null => no authoritative deadline yet (show stable placeholder, no digit)
+  // Compute the displayed count from the authoritative server deadline.
   const compute = () => {
     if (!deadline || !Number.isFinite(deadline)) return null;
-    const seconds = Math.ceil((deadline - now()) / 1000);
-    // Hard clamp: never above the real countdown, never below 0.
-    return Math.min(total, Math.max(0, seconds));
+    const serverNow = Date.now() + serverOffset;
+    const remaining = Math.ceil((deadline - serverNow) / 1000);
+    // Hard clamp: can NEVER show above `total`, never below 0.
+    return Math.min(total, Math.max(0, remaining));
   };
 
   const [n, setN] = useState(compute);
-  const [last, setLast] = useState(compute);
+  const lastRef = useRef(compute());
 
   useEffect(() => {
+    // Reset whenever a new countdown starts (new deadline).
     const fresh = compute();
     setN(fresh);
-    setLast(fresh);
-    if (fresh === null) return; // wait for the authoritative deadline
-    // 250ms tick so a late-arriving event converges fast; the INTEGERS still
-    // only change on second boundaries (ceil), so the count stays honest.
+    lastRef.current = fresh;
+    if (fresh === null) return;
+
     const id = setInterval(() => {
       const v = compute();
       setN(v);
-      setLast((prev) => {
-        if (v !== null && v > 0 && v !== prev) tick();
-        return v === null ? prev : v;
-      });
-    }, 250);
+      // Tick sound on each integer descent (5→4→3…), never on the same number twice.
+      if (v !== null && v > 0 && v !== lastRef.current) tick();
+      if (v !== null) lastRef.current = v;
+    }, 200);
     return () => clearInterval(id);
   }, [deadline, serverOffset, total]);
 
@@ -53,7 +54,7 @@ export default function Countdown({ deadline, serverOffset = 0, duration = 5 }) 
   return (
     <div className="flex flex-1 flex-col items-center justify-center">
       <p className="mb-4 text-xl font-bold uppercase tracking-[0.3em] text-arena-gold">
-        {noDeadline ? 'Get Ready' : 'Get Ready'}
+        Get Ready
       </p>
       <AnimatePresence mode="wait">
         {display === null ? (
