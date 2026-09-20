@@ -20,7 +20,7 @@ export function getAdminPin() {
   const stored = dbGet();
   if (stored && isValidAdminPin(stored)) return stored;
   const env = process.env.ADMIN_PIN;
-  if (env) return env;
+  if (env && String(env).trim()) return String(env).trim();
   return '000000';
 }
 
