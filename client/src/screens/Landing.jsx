@@ -1,5 +1,4 @@
 // Landing — brand entry: choose Player (join a game) or Host (run a quiz).
-import { BRANDING } from '../branding';
 import { motion } from 'framer-motion';
 import Logo from '../components/Logo.jsx';
 import { go } from '../App.jsx';
@@ -22,11 +21,11 @@ export default function Landing() {
       </motion.h1>
       <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
         className="mt-2 text-center text-lg font-semibold text-arena-gold/90">
-        {BRANDING.eventName}
+        Royal Rangers Live Quiz
       </motion.p>
       <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}
         className="mt-1 text-center text-sm text-white/50">
-        {BRANDING.tagline}
+        Who will rule the arena?
       </motion.p>
 
       <div className="mt-10 w-full max-w-sm space-y-4">
@@ -43,7 +42,7 @@ export default function Landing() {
       </div>
 
       <p className="absolute bottom-2 px-4 text-center text-xs leading-relaxed text-white/30 safe-bottom sm:bottom-6">
-        {BRANDING.footnote}
+        Free for Royal Rangers · works on any phone · designed for offline-ish networks
       </p>
     </div>
   );

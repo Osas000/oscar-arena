@@ -32,3 +32,6 @@ desktop.ini
 
 # QA artifacts
 server/test/qa-artifacts/
+
+# Local backup kept by the assistant, not app code
+*.jsx.bak

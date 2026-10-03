@@ -1,5 +1,4 @@
 // Host login gate — the admin PIN unlocks the builder + hosting.
-import { BRANDING } from '../branding';
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useHost } from '../store/useHost.js';
@@ -20,7 +19,7 @@ export default function HostLogin({ onBack }) {
         <Logo size={84} />
       </motion.div>
       <h1 className="mb-1 text-3xl font-extrabold text-white">Host Console</h1>
-      <p className="mb-8 text-arena-gold">{BRANDING.hostLabel}</p>
+      <p className="mb-8 text-arena-gold">Royal Rangers Quiz Control</p>
 
       <form onSubmit={submit} className="w-full max-w-sm space-y-4">
         <div>
