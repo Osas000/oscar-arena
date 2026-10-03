@@ -1,4 +1,5 @@
 // Player entry: enter the 6-digit game PIN + nickname, tap to join.
+import { BRANDING } from '../branding';
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { usePlayer } from '../store/usePlayer.js';
@@ -46,7 +47,7 @@ export default function PlayerJoin({ onBack }) {
 
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-extrabold tracking-tight text-white">OSCAR ARENA</h1>
-        <p className="mt-1 text-arena-gold">Royal Rangers Live Quiz</p>
+        <p className="mt-1 text-arena-gold">{BRANDING.eventName}</p>
       </div>
 
       <form onSubmit={submit} className="w-full max-w-sm space-y-4">
