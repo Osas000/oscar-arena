@@ -8,10 +8,22 @@
         "time_limit": 15,
         "points": 1000,
         "options": [
-          { "text": "Red, gold and blue", "correct": true },
-          { "text": "Green and white", "correct": false },
-          { "text": "Black and silver", "correct": false },
-          { "text": "Purple and pink", "correct": false }
+          {
+            "text": "Red, gold and blue",
+            "correct": true
+          },
+          {
+            "text": "Green and white",
+            "correct": false
+          },
+          {
+            "text": "Black and silver",
+            "correct": false
+          },
+          {
+            "text": "Purple and pink",
+            "correct": false
+          }
         ]
       },
       {
@@ -20,10 +32,22 @@
         "time_limit": 15,
         "points": 1000,
         "options": [
-          { "text": "Luke 2:52", "correct": true },
-          { "text": "John 3:16", "correct": false },
-          { "text": "Psalm 23", "correct": false },
-          { "text": "Genesis 1:1", "correct": false }
+          {
+            "text": "Luke 2:52",
+            "correct": true
+          },
+          {
+            "text": "John 3:16",
+            "correct": false
+          },
+          {
+            "text": "Psalm 23",
+            "correct": false
+          },
+          {
+            "text": "Genesis 1:1",
+            "correct": false
+          }
         ]
       },
       {
@@ -32,8 +56,14 @@
         "time_limit": 12,
         "points": 1000,
         "options": [
-          { "text": "True", "correct": true },
-          { "text": "False", "correct": false }
+          {
+            "text": "True",
+            "correct": true
+          },
+          {
+            "text": "False",
+            "correct": false
+          }
         ]
       },
       {
@@ -42,10 +72,507 @@
         "time_limit": 15,
         "points": 1000,
         "options": [
-          { "text": "Red, gold, blue", "correct": true },
-          { "text": "Red, white, blue", "correct": false },
-          { "text": "Gold, green, black", "correct": false },
-          { "text": "Blue, white, red", "correct": false }
+          {
+            "text": "Red, gold, blue",
+            "correct": true
+          },
+          {
+            "text": "Red, white, blue",
+            "correct": false
+          },
+          {
+            "text": "Gold, green, black",
+            "correct": false
+          },
+          {
+            "text": "Blue, white, red",
+            "correct": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "title": "Do the Street Media Summit — LENS",
+    "questions": [
+      {
+        "type": "mc",
+        "prompt": "In Web 1.0, information mainly flowed in which direction?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "Both ways at the same speed",
+            "correct": false
+          },
+          {
+            "text": "Only between government offices",
+            "correct": false
+          },
+          {
+            "text": "From the website to the user — you read, you did not reply",
+            "correct": true
+          },
+          {
+            "text": "From the user to the website",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "What made Web 2.0 different from Web 1.0?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "It was only for businesses",
+            "correct": false
+          },
+          {
+            "text": "It stopped using the internet",
+            "correct": false
+          },
+          {
+            "text": "It became the participatory web — users created and shared content",
+            "correct": true
+          },
+          {
+            "text": "It became much faster to load",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "Web 1.0 is best described as...",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "The Intelligent Web",
+            "correct": false
+          },
+          {
+            "text": "The Participatory Web",
+            "correct": false
+          },
+          {
+            "text": "The Video Web",
+            "correct": false
+          },
+          {
+            "text": "The Read Web",
+            "correct": true
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "Web 2.0 is best described as...",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "The Participatory Web",
+            "correct": true
+          },
+          {
+            "text": "The Read Web",
+            "correct": false
+          },
+          {
+            "text": "The Broadcast Web",
+            "correct": false
+          },
+          {
+            "text": "The Print Web",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "Which statement about the current AI Web is true?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "It requires you to learn computer programming",
+            "correct": false
+          },
+          {
+            "text": "It only works for video",
+            "correct": false
+          },
+          {
+            "text": "It replaced the need for media workers entirely",
+            "correct": false
+          },
+          {
+            "text": "You describe the outcome, and the machine helps produce the work",
+            "correct": true
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "What is the core idea of the Interactive Media Interview Engine?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "It asks you what you want so you do not have to know how design works",
+            "correct": true
+          },
+          {
+            "text": "It uploads media automatically",
+            "correct": false
+          },
+          {
+            "text": "It chooses the sermon for you",
+            "correct": false
+          },
+          {
+            "text": "It replaces the media worker",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "When LENS interviews you about a flyer, what is it mainly trying to capture?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "Your church's bank details",
+            "correct": false
+          },
+          {
+            "text": "Your password",
+            "correct": false
+          },
+          {
+            "text": "Your internet speed",
+            "correct": false
+          },
+          {
+            "text": "The facts — the date, time, venue, speaker and audience",
+            "correct": true
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "Why does the interview only ask about what is genuinely missing?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "Because the app is slow",
+            "correct": false
+          },
+          {
+            "text": "To fill up the screen",
+            "correct": false
+          },
+          {
+            "text": "To avoid making a media worker repeat what they already said",
+            "correct": true
+          },
+          {
+            "text": "Because the other questions are secret",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "In the demo, LENS pulled the date, time and venue out of a single sentence. How?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "It read the description and extracted what was actually stated",
+            "correct": true
+          },
+          {
+            "text": "The media worker typed them into separate boxes",
+            "correct": false
+          },
+          {
+            "text": "It guessed them",
+            "correct": false
+          },
+          {
+            "text": "It searched the internet for the event",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "What happens on the brief before anything is generated?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "You can edit any detail before it is used",
+            "correct": true
+          },
+          {
+            "text": "It is deleted automatically",
+            "correct": false
+          },
+          {
+            "text": "Everything is locked immediately",
+            "correct": false
+          },
+          {
+            "text": "It is sent straight to the printer",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "LENS generates the image directly, what does it produce for the user instead?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "Nothing at all",
+            "correct": false
+          },
+          {
+            "text": "A blank canvas",
+            "correct": false
+          },
+          {
+            "text": "A complete prompt they can paste into their own ChatGPT or Gemini",
+            "correct": true
+          },
+          {
+            "text": "An error page",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "Why is the prompt so useful when LENS cannot generate the image itself?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "It carries the confirmed facts, which the user's own AI tool does not know",
+            "correct": true
+          },
+          {
+            "text": "It works without internet",
+            "correct": false
+          },
+          {
+            "text": "It makes the image higher resolution",
+            "correct": false
+          },
+          {
+            "text": "It is shorter",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "Why does LENS list the exact words to check in the finished design?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "Because the user must proof-read everything anyway",
+            "correct": false
+          },
+          {
+            "text": "Because the app cannot count characters",
+            "correct": false
+          },
+          {
+            "text": "Because image models sometimes mis-spell or alter text",
+            "correct": true
+          },
+          {
+            "text": "To make the user do the design work",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "What is the first step in the CREATE process?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "Choose a font",
+            "correct": false
+          },
+          {
+            "text": "Describe what you need in your own words",
+            "correct": true
+          },
+          {
+            "text": "Buy equipment",
+            "correct": false
+          },
+          {
+            "text": "Open Photoshop",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "Which statement about church media today is correct?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "Media work is finished and closing down",
+            "correct": false
+          },
+          {
+            "text": "Nobody uses phones for media any more",
+            "correct": false
+          },
+          {
+            "text": "Churches have too many cameras and not enough problems",
+            "correct": false
+          },
+          {
+            "text": "The problem is no longer equipment — it is turning a burden into something consistent",
+            "correct": true
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "Why does LENS call itself an operating system rather than an app?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "Because it is free",
+            "correct": false
+          },
+          {
+            "text": "Because it runs on your computer",
+            "correct": false
+          },
+          {
+            "text": "Because it covers the whole journey, not one isolated task",
+            "correct": true
+          },
+          {
+            "text": "Because it only makes videos",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "If two different churches use LENS, can one see the other's sermons and media?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "Only if they are in the same district",
+            "correct": false
+          },
+          {
+            "text": "Yes — everyone sees everything",
+            "correct": false
+          },
+          {
+            "text": "No — each church has its own private workspace",
+            "correct": true
+          },
+          {
+            "text": "Only the admin can see both",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "What does the role of Media Coordinator allow that a Viewer does not?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "To create, edit and run media work through the system",
+            "correct": true
+          },
+          {
+            "text": "To see other churches",
+            "correct": false
+          },
+          {
+            "text": "To change the database",
+            "correct": false
+          },
+          {
+            "text": "To delete the church account",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "Your church wants the best results from LENS. What is the recommended step?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "Subscribe to a paid AI plan and paste in your own API key",
+            "correct": true
+          },
+          {
+            "text": "Delete the account and start again",
+            "correct": false
+          },
+          {
+            "text": "Buy a bigger server",
+            "correct": false
+          },
+          {
+            "text": "Wait for the church to get more members",
+            "correct": false
+          }
+        ]
+      },
+      {
+        "type": "mc",
+        "prompt": "What is the one sentence that best describes LENS?",
+        "time_limit": 10,
+        "points": 1000,
+        "options": [
+          {
+            "text": "It is a social network for pastors",
+            "correct": false
+          },
+          {
+            "text": "It replaces the media team",
+            "correct": false
+          },
+          {
+            "text": "It only stores sermon recordings",
+            "correct": false
+          },
+          {
+            "text": "It helps a church turn what it wants to say into media that is ready to publish",
+            "correct": true
+          }
         ]
       }
     ]
